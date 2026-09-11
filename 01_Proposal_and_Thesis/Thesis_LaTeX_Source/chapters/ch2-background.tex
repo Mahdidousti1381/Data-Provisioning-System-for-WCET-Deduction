@@ -1,0 +1,191 @@
+% ==============================================================================
+% فصل دوم: مفاهیم پایه و پیشینه پژوهش
+% ==============================================================================
+
+\chapter{مفاهیم پایه و پیشینه پژوهش}
+\label{ch:background}
+
+\section{مقدمه}
+ارزیابی و تضمین رفتارهای زمانی در سامانه‌های تعبیه‌شده بی‌درنگ، نیازمند فهم هم‌زمان مبانی ریاضی نظریه زمان‌بندی، ویژگی‌های ریزمعماری سخت‌افزار و استانداردهای صنعتی حاکم بر ردگیری دستورات است. در این فصل، ابتدا فرمول‌بندی ریاضی و مفاهیم بنیادین «بیشینه زمان اجرا» (\lr{WCET}) و طبقه‌بندی رویکردهای استنتاج آن مورد بررسی قرار می‌گیرد. سپس معماری عیب‌یابی و پایش بی‌درنگ \lr{ARM CoreSight} به عنوان استاندارد پیشرو در پردازنده‌های نوین تشریح شده و نقش هر یک از اجزای داخلی آن در زنجیره انتقال داده تبیین می‌گردد. در پایان، رویکرد این رساله در چارچوب پلتفرم‌های تجاری آزمون محصول و پیشینه پژوهش‌های بین‌المللی به صورت تطبیقی مقایسه خواهد شد.
+
+\section{مفهوم فرمالیزه‌شده بیشینه زمان اجرا (\lr{WCET})}
+در یک سامانه تعبیه‌شده بی‌درنگ، هر وظیفه محاسباتی (\lr{Task}) باید پیش از رسیدن به ضرب‌الاجل زمانی خود (\lr{Deadline}) خاتمه یابد. زمان اجرای یک وظیفه، کمیت ثابتی نیست بلکه تابعی از ورودی‌های متغیر محیطی و حالات داخلی سخت‌افزار است. 
+
+به صورت ریاضی، اگر فضای ورودی‌های معتبر برنامه را با $\mathcal{P}$ و فضای تمامی حالات ممکن سخت‌افزار در آغاز اجرای وظیفه (شامل وضعیت خط‌لوله، حافظه نهان و صف‌های انتقال) را با $\mathcal{S}_0$ نمایش دهیم، زمان واقعی اجرای برنامه به صورت یک تابع غیرخطی به فرم زیر بیان می‌شود:
+\begin{equation}
+T = f(p, s_0) \quad \text{\rl{که در آن}} \quad p \in \mathcal{P}, \; s_0 \in \mathcal{S}_0
+\end{equation}
+
+بر این اساس، بیشینه زمان اجرا (\lr{WCET}) عبارت است از سوپرمم (بیشترین مقدار) این تابع بر روی تمامی ترکیبات ممکن ورودی‌ها و حالات اولیه سخت‌افزار:
+\begin{equation}
+\mathrm{WCET} \triangleq \max_{p \in \mathcal{P}, \; s_0 \in \mathcal{S}_0} f(p, s_0)
+\end{equation}
+
+\begin{figure}[ht]
+\centering
+\begin{latin}
+\begin{tikzpicture}[xscale=1.18, yscale=1.05, every node/.append style={font=\latinfont}]
+    % Axes
+    \draw[-latex, thick] (0,0) -- (9.6,0) node[right=3pt] {\small \rl{زمان اجرا} (\lr{Time})};
+    \draw[-latex, thick] (0,0) -- (0,4.4) node[above=2pt] {\small \rl{چگالی احتمال} $P(T)$};
+    
+    % Distribution curve
+    \draw[very thick, blue!80!black, fill=blue!10, smooth, domain=0.8:6.0] plot (\x, {3.2*exp(-0.9*(\x-3.0)^2)});
+    
+    % Points on x axis
+    \coordinate (BCET) at (1.4,0);
+    \coordinate (ACET) at (3.0,0);
+    \coordinate (MAX_OBS) at (4.8,0);
+    \coordinate (WCET_REAL) at (6.4,0);
+    \coordinate (WCET_EST) at (8.2,0);
+    
+    % Vertical lines
+    \draw[dashed, gray] (1.4,0) -- (1.4,1.2);
+    \draw[dashed, blue] (3.0,0) -- (3.0,3.2);
+    \draw[thick, orange!90!black] (4.8,0) -- (4.8,2.2) node[above=3pt, font=\scriptsize\latinfont, text=orange!90!black, align=center] {\rl{بیشینه مشاهده‌شده}\\\lr{(Max Observed)}};
+    \draw[thick, red!80!black] (6.4,0) -- (6.4,3.0) node[above=3pt, font=\scriptsize\latinfont, text=red!80!black, align=center] {\rl{بیشینه واقعی}\\\lr{(True WCET)}};
+    \draw[thick, green!60!black] (8.2,0) -- (8.2,3.8) node[above=3pt, font=\scriptsize\latinfont, text=green!50!black, align=center] {\rl{کران امن برآوردشده}\\\lr{(Safe WCET Bound)}};
+    
+    % Labels below axis
+    \node[below=4pt, font=\small\latinfont] at (BCET) {BCET};
+    \node[below=4pt, font=\small\latinfont] at (ACET) {ACET};
+    \node[below=4pt, font=\small\latinfont] at (MAX_OBS) {$T_{\mathrm{max\_obs}}$};
+    \node[below=4pt, font=\small\latinfont] at (WCET_REAL) {$\mathrm{WCET}_{\mathrm{real}}$};
+    \node[below=4pt, font=\small\latinfont] at (WCET_EST) {$\mathrm{WCET}_{\mathrm{bound}}$};
+    
+    % Risk areas - cleanly separated by y-level and color
+    \draw[latex-latex, red!90!black, very thick] (4.8,0.7) -- node[above=4pt, font=\scriptsize\latinfont, text=red!90!black] {\rl{ناحیه ریسک ناامن}} (6.4,0.7);
+    \draw[latex-latex, green!60!black, very thick] (6.4,1.6) -- node[above=4pt, font=\scriptsize\latinfont, text=green!60!black] {\rl{حاشیه اطمینان مهندسی}} (8.2,1.6);
+\end{tikzpicture}
+\end{latin}
+\caption{فضای توزیع زمان اجرای برنامه و موقعیت بیشینه زمان اجرا نسبت به زمان‌های مشاهده‌شده و کران امن}
+\label{fig:wcet_distribution}
+\end{figure}
+
+همان‌طور که در شکل \ref{fig:wcet_distribution} نشان داده شده است، در عمل یافتن دقیق نقطه $\mathrm{WCET}_{\mathrm{real}}$ به دلیل بی‌شمار بودن فضای حالات ورودی و سخت‌افزار بسیار دشوار است. بنابراین، مهندسی سامانه‌های بی‌درنگ به دنبال یافتن یک \textbf{کران بالای امن (\lr{Safe Upper Bound})} است به طوری که:
+\begin{equation}
+\mathrm{WCET}_{\mathrm{bound}} \ge \mathrm{WCET}_{\mathrm{real}}
+\end{equation}
+
+در صورتی که کران برآوردشده کمتر از مقدار واقعی باشد ($\mathrm{WCET}_{\mathrm{bound}} < \mathrm{WCET}_{\mathrm{real}}$)، با یک برآورد نامعتبر و ناامن (\lr{Unsafe Estimation}) روبه‌رو هستیم که می‌تواند موجب شکست سیستم در سناریوهای بحرانی شود. از طرف دیگر، اگر این کران بیش‌از‌حد محافظه‌کارانه و بزرگ تعیین شود (\lr{Over-estimation})، مهندس طراح مجبور به انتخاب پردازنده‌های گران‌تر و منابع سخت‌افزاری مازاد بر نیاز خواهد شد.
+
+\section{طبقه‌بندی متدولوژی‌های استخراج \lr{WCET}}
+رویکردهای تعیین بیشینه زمان اجرا در ادبیات علمی به سه شاخه بنیادین تقسیم می‌شوند \cite{wilhelm2008worst}:
+
+\subsection{روش‌های تحلیل ایستا (\lr{Static WCET Analysis})}
+در روش‌های ایستا، کد باینری کامپایل‌شده بدون اجرای واقعی بر روی سخت‌افزار، مورد پردازش و تحلیل صوری ریاضی قرار می‌گیرد. این متدولوژی شامل سه گام کلیدی است:
+\begin{enumerate}
+    \item \textbf{استخراج گراف جریان کنترل (\lr{Control Flow Graph - CFG}):} بازسازی ساختار شاخه‌ها، حلقه‌ها و توابع از کد ماشین.
+    \item \textbf{مدل‌سازی سخت‌افزار (\lr{Hardware Modeling}):} پیش‌بینی رفتار چرخه‌ای پردازنده (تخمین رفتار خط‌لوله و نرخ اصابت کش با استفاده از تئوری تفسیر انتزاعی یا \lr{Abstract Interpretation}).
+    \item \textbf{تکنیک شمارش ضمنی مسیرها (\lr{IPET - Implicit Path Enumeration}):} فرمول‌بندی مسئله یافتن طولانی‌ترین مسیر در قالب یک مسئله برنامه‌ریزی خطی عدد صحیح (\lr{Integer Linear Programming - ILP}). اگر $x_i$ بیانگر تعداد دفعات اجرای بلوک پایه $i$ و $c_i$ کران بالای زمان اجرای آن بلوک باشد، مسئله به فرم زیر بهینه‌سازی می‌شود:
+    \begin{equation}
+    \mathrm{WCET} = \max \sum_{i=1}^{N} c_i \cdot x_i
+    \end{equation}
+    با قید برقراری معادلات پیوستگی جریان ورودی و خروجی در گره‌های گراف جریان برنامه.
+\end{enumerate}
+
+\textbf{نقاط ضعف روش‌های ایستا:} با ظهور پردازنده‌های مدرن با هسته‌های پیچیده، مدل‌سازی رفتار چرخه به چرخه ریزمعماری به دلیل پدیده‌هایی نظیر عدم‌تعین حافظه‌های نهان اشتراکی، تداخل گذرگاه‌ها و اجرای خارج از نوبت (\lr{Out-of-Order Execution}) عملاً ناممکن گشته یا به تخمین‌هایی با خطای بالای ۵۰ تا ۱۰۰ درصد محافظه‌کاری منجر می‌شود.
+
+\subsection{روش‌های مبتنی بر اندازه‌گیری تجربی (\lr{MBTA})}
+در رویکرد \lr{MBTA}، برنامه با مجموعه‌ای از سناریوهای آزمون بر روی سخت‌افزار فیزیکی اجرا شده و زمان‌های پاسخ مستقیماً ثبت می‌گردند \cite{bernat2002wcet}. چالش‌های اصلی این متدولوژی عبارتند از:
+\begin{itemize}
+    \item \textbf{پوشش ورودی‌های بدترین شرایط (\lr{Worst-Case Input Space}):} تضمین اینکه آزمون‌ها توانسته‌اند مسیر منجر به بیشینه زمان را فعال سازند بسیار دشوار است (نقشی که در پروژه حاضر به سامانه تست خودکار آقای حسن آملی واگذار شده است).
+    \item \textbf{اثر تهاجمی ابزار دقیق (\lr{Probe Effect}):} برای آگاهی از مسیر پیموده‌شده و زمان قطعات کد، نباید ساختار کد تغییر کند؛ معضلی که تنها با ردگیری سخت‌افزاری قابل حل است.
+\end{itemize}
+
+\subsection{روش‌های ترکیبی (\lr{Hybrid WCET Analysis})}
+این روش‌ها از تلفیق نقاط قوت دو رویکرد پیشین پدید آمده‌اند \cite{betts2010hybrid}. در رویکرد ترکیبی، سنجش زمان اجرای قطعات پایه برنامه‌ریزی‌شده (\lr{Basic Blocks}) بر عهده ردگیری سخت‌افزاری بر روی پردازنده واقعی گذاشته می‌شود تا رفتار پیچیده خط‌لوله و کش مستقیماً از واقعیت استخراج گردد؛ سپس با تزریق این زمان‌های تجربی دقیق به عنوان ضرایب $c_i$ در مدل‌های ایستا (\lr{IPET})، بیشینه زمان اجرای کل ساختار برنامه به صورت ریاضی محاسبه می‌گردد.
+
+\section{معماری عیب‌یابی و ردگیری \lr{ARM CoreSight}}
+برای پاسخ به نیاز صنعت در زمینه پایش و صحه‌گذاری سامانه‌های بی‌درنگ بدون متوقف کردن هسته پردازنده یا تحمیل اثر پروب، شرکت \lr{ARM} معماری جامع \textbf{\lr{CoreSight}} را به عنوان استاندارد سخت‌افزاری درون‌تراشه‌ای پایه‌گذاری نمود \cite{armcoresight2013}. 
+
+معماری \lr{CoreSight} یک زیرسیستم سخت‌افزاری کاملاً مجزا از هسته محاسباتی است که به صورت موازی در کنار هسته اجرا می‌شود. در تراشه‌های سری \lr{STM32H750} (مبتنی بر هسته \lr{Cortex-M7})، این زیرسیستم شامل زنجیره‌ای از واحدهای تخصصی است که در شکل \ref{fig:coresight_pipeline} نشان داده شده‌اند.
+
+\begin{figure}[ht]
+\centering
+\begin{latin}
+\begin{tikzpicture}[
+    every node/.append style={font=\latinfont},
+    node distance=2.5cm and 2.6cm,
+    hw/.style={rectangle, draw=black!80, fill=gray!10, thick, rounded corners=5pt, text width=4.8cm, align=center, minimum height=1.75cm},
+    trace/.style={rectangle, draw=blue!80, fill=blue!10, thick, rounded corners=5pt, text width=4.8cm, align=center, minimum height=1.75cm},
+    ext/.style={rectangle, draw=orange!80, fill=orange!10, thick, rounded corners=5pt, text width=5.2cm, align=center, minimum height=1.75cm},
+    arrow/.style={-latex, very thick}
+]
+    % On-chip Core & Trigger
+    \node [hw] (core) {\textbf{Cortex-M7 Core}\\[0.15cm]\small Pipeline \& Execution};
+    \node [hw, right=2.6cm of core] (dwt) {\textbf{DWT Unit}\\[0.15cm]\small Comparators (COMP0/1)};
+    
+    % Trace Generation
+    \node [trace, below=2.5cm of core] (etm) {\textbf{ETMv4}\\[0.15cm]\small Trace Compression};
+    
+    % Transport
+    \node [trace, below=2.5cm of etm] (cstf) {\textbf{CSTF (Trace Funnel)}\\[0.15cm]\small ATB Bus Multiplexing};
+    \node [trace, right=2.6cm of cstf] (etf) {\textbf{ETF (Trace FIFO)}\\[0.15cm]\small Burst Data Buffer};
+    \node [trace, below=2.5cm of cstf] (tpiu) {\textbf{TPIU}\\[0.15cm]\small Port Formatter (ATB \ensuremath{\to} Pins)};
+    
+    % Off-chip Pins & Analyzer
+    \node [ext, below=2.7cm of tpiu] (pins) {\textbf{Physical Package Pins}\\[0.15cm]\small TRACECLK + TRACED[3:0]};
+    \node [ext, right=2.8cm of pins] (dslogic) {\textbf{DSLogic U3Pro16}\\[0.15cm]\small \mbox{10x Oversampled} Logic Capture};
+    \node [ext, above=2.7cm of dslogic] (host) {\textbf{Host Python / OpenCSD}\\[0.15cm]\small Snapshot Replay \& Decode};
+
+    % Connections
+    \draw [arrow] (core) -- node[left=4pt, font=\small] {Instruction Flow} (etm);
+    \draw [arrow] (dwt.south) |- node[near end, above=4pt, font=\small] {Trigger Signals} (etm.east);
+    \draw [arrow] (etm) -- node[left=4pt, font=\small] {ATB Stream} (cstf);
+    \draw [arrow, latex-latex] (cstf) -- (etf);
+    \draw [arrow] (cstf) -- (tpiu);
+    \draw [arrow] (tpiu) -- node[left=4pt, font=\small] {4-bit Parallel} (pins);
+    \draw [arrow] (pins) -- node[midway, above=4pt, font=\small, fill=white, inner sep=2pt] {Physical Probing} (dslogic);
+    \draw [arrow] (dslogic) -- node[right=4pt, font=\small] {Raw CSV Samples} (host);
+\end{tikzpicture}
+\end{latin}
+\caption{زنجیره کامل جریان سیگنال‌ها در معماری \lr{ARM CoreSight} از هسته پردازنده تا ابزار تحلیل}
+\label{fig:coresight_pipeline}
+\end{figure}
+
+\subsection{اجزای زیرسیستم \lr{CoreSight} در \lr{STM32H750}}
+\begin{enumerate}
+    \item \textbf{واحد پورت دسترسی به عیب‌یابی (\lr{DAP - Debug Access Port}):} درگاه اصلی اتصال ابزارهای دیباگ خارجی از طریق رابط‌های دو سیمه \lr{SWD} یا چندسیمه \lr{JTAG} جهت دسترسی به ثبّات‌های کنترلی و فضای آدرس حافظه بدون مداخله هسته.
+    \item \textbf{گذرگاه پیشرفته ردگیری (\lr{ATB - Advanced Trace Bus}):} پروتکل گذرگاه داده همگام و پرسرعت درون‌تراشه‌ای که بسته‌های ردگیری تولیدشده توسط ماژول‌های پایش را میان اجزای گوناگون منتقل می‌سازد.
+    \item \textbf{واحد نگهبان داده و ردگیری (\lr{DWT - Data Watchpoint and Trace}):} ماژولی حیاتی که وظایف متعددی نظیر شمارش چرخه‌های زمانی (\lr{CYCCNT}) و مقایسه آدرس‌های حافظه را انجام می‌دهد. ثبّات‌های مقایسه‌گر \lr{DWT\_COMP0} و \lr{DWT\_COMP1} نقشی محوری در تعریف محدوده پنجره‌های پایش دارند؛ به طوری که با رسیدن آدرس اشاره‌گر دستورات به یک برچسب خاص، سیگنال شروع یا پایان ردگیری به \lr{ETM} صادر می‌گردد.
+    \item \textbf{قیف ادغام ردگیری (\lr{CSTF - CoreSight Trace Funnel}):} ماژولی چندورودی-تک‌خروجی که وظیفه تلفیق جریان داده‌های ردگیری از منابع مختلف درون‌تراشه‌ای (نظیر هسته‌های چندگانه، \lr{ETM} و \lr{ITM}) به یک گذرگاه واحد \lr{ATB} را با شناسه مبدأ (\lr{Trace Source ID}) مشخص عهده‌دار است.
+    \item \textbf{بافر میانی جریان داده (\lr{ETF - Embedded Trace FIFO}):} یک حافظه \lr{SRAM} حلقوی درون‌تراشه‌ای جهت جذب انفجارهای ناگهانی داده‌های \lr{Trace} (\lr{Data Bursts})؛ در زمان‌هایی که انشعاب‌های شرطی مکرر موجب افزایش نرخ تولید بسته شده و پهنای باند پورت خروجی پاسخگو نیست.
+    \item \textbf{واحد واسط پورت ردیابی (\lr{TPIU - Trace Port Interface Unit}):} آخرین حلقه زنجیره درون‌تراشه‌ای که فریم‌های پروتکل \lr{ATB} را دریافت کرده، آن‌ها را با الگوهای همگام‌سازی فریم (بایت \texttt{0x7F}) بسته‌بندی نموده و به صورت جفت‌نیبل‌های موازی روی کلاک خروجی و پایه‌های خارجی تراشه منتشر می‌سازد.
+\end{enumerate}
+
+\section{پیشینه پژوهش و مقایسه تطبیقی رویکردها}
+رویکردهای پایش، استخراج مسیر و ارزیابی زمان در سامانه‌های نهفته در جدول \ref{tab:trace_comparison} مورد مقایسه قرار گرفته‌اند.
+
+\begin{table}[ht]
+\centering
+\small
+\setlength{\tabcolsep}{3.5pt}
+\renewcommand{\arraystretch}{1.45}
+\caption{مقایسه تطبیقی پلتفرم‌های آزمون و ردگیری اجرای برنامه در سیستم‌های نهفته}
+\label{tab:trace_comparison}
+\begin{tabularx}{\textwidth}{|>{\hsize=1.3\hsize\raggedleft\arraybackslash}X|*{4}{>{\hsize=0.925\hsize\centering\arraybackslash}X|}}
+\hline
+\textbf{معیار مقایسه} & \textbf{ابزاردقیق نرم‌افزاری} & \textbf{شبیه‌ساز نرم‌افزاری} & \textbf{پلتفرم تجاری (\lr{Rapita/Speedgoat})} & \textbf{پلتفرم این رساله} \\
+\hline
+سربار زمانی \lr{(Probe Effect)} & بالا ($>15\%$) & صفر & صفر (غیرتهاجمی) & \textbf{صفر (غیرتهاجمی)} \\
+\hline
+تغییر کد منبع \lr{(Source Intrusion)} & نیاز دارد & بی‌نیاز & بی‌نیاز & \textbf{کاملاً بی‌نیاز} \\
+\hline
+دقت زمانی و رفتار چرخه‌ای & مخدوش و دارای جیتر & تقریبی & چرخه دقیق & \textbf{چرخه دقیق (جیتر صفر)} \\
+\hline
+هزینه لایسنس و سامانه آزمون & ناچیز & ناچیز & بسیار بالا ($>\$10,000$) & \textbf{حداقل هزینه (اقتصادی)} \\
+\hline
+وابستگی به برنامه کامپایل‌شده & بالا & کامل & فقط فایل باینری & \textbf{فقط باینری (\lr{.elf})} \\
+\hline
+پشتیبانی از پایش وقفه‌ها & نامطمئن & وابسته به مدل & کامل & \textbf{کامل و تفکیک‌شده} \\
+\hline
+\end{tabularx}
+\end{table}
+
+همان‌گونه که از جدول \ref{tab:trace_comparison} برمی‌آید، در صنایع هوافضا، خودروسازی و اتوماسیون پیشرفته، پلتفرم‌های تجاری آزمون خودکار محصول و تحلیل زمان‌بندی (نظیر محصولات \lr{Rapita Systems} و بسترهای \lr{Speedgoat}) استاندارد طلایی به شمار می‌روند؛ اما استقرار این پلتفرم‌ها نیازمند هزینه‌های بسیار سنگین (ده‌ها هزار دلار) و تجهیزات انحصاری است. یکی از مهم‌ترین اهداف و دستاوردهای محصول مشترک این پژوهش و پروژه همگام (سامانه آزمون خودکار)، تحقق یک پلتفرم آزمون محصول کارا و ارزان‌قیمت است که توانسته فرآیند آزمون نرم‌افزار، ماک‌سازی پریفرال‌ها و استخراج مسیر اجرا را با حداقل هزینه محقق سازد.
+
+همچنین در سطح سخت‌افزار دریافت سیگنال، اگرچه پروب‌های سخت‌افزاری تجاری نظیر \lr{SEGGER J-Trace} به ثبت مستقیم در فرکانس‌های بالا می‌پردازند، اما درون آن‌ها از تراشه‌های اختصاصی \lr{FPGA} و حافظه‌های سریع \lr{DRAM} استفاده شده است. آزمون‌های تجربی این پروژه نشان داد که لاجیک‌آنالایزرهای عمومی اقتصادی نهایتاً برای فرکانس‌های بسیار بالا ایده‌آل نبوده و بهترین انتخاب سخت‌افزاری، یک برد سفارشی مبتنی بر \lr{FPGA} است؛ هرچند هزینه پیاده‌سازی اختصاصی آن با هزینه خرید پروب‌های تجاری تقریباً برابری خواهد کرد. با این حال، ارزش افزوده اصلی این رساله، توسعه کل چرخه نرم‌افزاری استخراج و دیکودینگ داده‌ها با هزینه بسیار پایین است.
+
+\section{جمع‌بندی فصل}
+در این فصل پایه‌های تئوریک محاسبه \lr{WCET} و ساختار لایه‌ای معماری \lr{ARM CoreSight} تشریح گردید. همچنین ضرورت اجتناب از ابزاردقیق نرم‌افزاری و مزایای اقتصادی و فنی پلتفرم توسعه‌داده‌شده نسبت به راهکارهای تجاری گران‌قیمت بازار مورد ارزیابی قرار گرفت. با استناد به این مبانی، در فصل سوم به طراحی معماری کلان سامانه و پیاده‌سازی گام‌به‌گام خط لوله تأمین داده پرداخته خواهد شد.

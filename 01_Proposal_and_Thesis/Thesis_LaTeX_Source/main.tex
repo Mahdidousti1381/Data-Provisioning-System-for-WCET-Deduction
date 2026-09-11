@@ -1,0 +1,105 @@
+% ==============================================================================
+% فایل اصلی پایان‌نامه کارشناسی (Master Thesis File)
+% دانشگاه تهران - دانشکدگان فنی - دانشکده مهندسی برق و کامپیوتر
+% عنوان: طراحی سیستم تأمین داده جهت استنتاج WCET
+% نگارش: محمد مهدی دوست محمدی (810100142)
+% استاد راهنما: دکتر مهدی کارگهی
+% ==============================================================================
+
+\documentclass[12pt,a4paper,oneside]{book}
+
+% فراخوانی تنظیمات، بسته‌ها و استایل‌ها
+\input{preamble.tex}
+
+\begin{document}
+
+% ------------------------------------------------------------------------------
+% بخش‌های ابتدایی (Front Matter)
+% ------------------------------------------------------------------------------
+\frontmatter
+
+% روی جلد فارسی
+\input{frontmatter/cover-fa.tex}
+
+% تعهدنامه اصالت اثر
+\input{frontmatter/commitment.tex}
+
+% صفحه سپاسگزاری و تقدیم
+\input{frontmatter/dedication.tex}
+
+% شماره‌گذاری صفحات مقدماتی
+\pagenumbering{tartibi}
+
+% چکیده فارسی
+\input{frontmatter/abstract-fa.tex}
+
+% فهرست مطالب
+\newpage
+\tableofcontents
+
+% فهرست جداول
+\newpage
+\listoftables
+
+% فهرست تصاویر و نمودارها
+\newpage
+\listoffigures
+
+% ------------------------------------------------------------------------------
+% متن اصلی پایان‌نامه (Main Matter)
+% ------------------------------------------------------------------------------
+\mainmatter
+\pagenumbering{arabic}
+
+% تقدم مراجع فنی، استانداردهای معماری و ابزارها بر مقالات آکادمیک در ترتیب فهرست منابع
+\nocite{armcoresight2013,dslab2023dsview,armetmv42017,st2020stm32h7,linaroopencsd}
+
+% فصل اول: کلیات، بیان مسئله و اهداف پروژه
+% فصل اول: مقدمه و بیان مسئله
+\include{chapters/ch1-intro}
+
+% فصل دوم: مفاهیم پایه و پیشینه پژوهش
+\include{chapters/ch2-background}
+
+% فصل سوم: معماری کلان سامانه
+\include{chapters/ch3-architecture}
+
+% فصل چهارم: طراحی و پیاده‌سازی سخت‌افزار
+\include{chapters/ch4-hardware}
+
+% فصل پنجم: پیکربندی ETMv4 و Firmware
+\include{chapters/ch5-firmware-etm}
+
+% فصل ششم: پردازش و رمزگشایی Trace
+\include{chapters/ch6-decoding}
+
+% فصل هفتم: ارزیابی تجربی و نتایج
+\include{chapters/ch7-evaluation}
+
+% فصل هشتم: نتیجه‌گیری و کارهای آینده
+\include{chapters/ch8-conclusion}
+
+% ------------------------------------------------------------------------------
+% مراجع و بخش‌های پایانی (Back Matter)
+% ------------------------------------------------------------------------------
+\backmatter
+
+% مراجع پایان‌نامه
+\newpage
+\pagestyle{plain}
+\begin{latin}
+\begingroup
+\let\oldthebibliography\thebibliography
+\def\thebibliography#1{\oldthebibliography{#1}\setlength{\itemsep}{1pt}\setlength{\parskip}{0pt}}
+\bibliographystyle{ieeetr}
+\bibliography{references}
+\endgroup
+\end{latin}
+
+% چکیده انگلیسی
+\input{frontmatter/abstract-en.tex}
+
+% روی جلد انگلیسی (پشت جلد)
+\input{frontmatter/cover-en.tex}
+
+\end{document}

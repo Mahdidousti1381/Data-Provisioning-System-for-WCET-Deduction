@@ -1,0 +1,167 @@
+% ==============================================================================
+% فایل تنظیمات و بسته‌های نگارش پایان‌نامه (Preamble)
+% دانشگاه تهران - دانشکدگان فنی - دانشکده مهندسی برق و کامپیوتر
+% طراحی سیستم تأمین داده جهت استنتاج WCET
+% دانشجو: محمد مهدی دوست محمدی (810100142)
+% ==============================================================================
+
+% تنظیمات ابعاد صفحه و حاشیه‌ها (مطابق فایل الگوی گزارش PSA1 و دانشگاه تهران)
+\usepackage[
+    a4paper,
+    top=30mm,
+    bottom=25.4mm,
+    left=22.2mm,
+    right=24.3mm,
+    headheight=16pt,
+    footskip=12mm
+]{geometry}
+
+% تنظیم عمق فهرست مطالب و شماره‌گذاری بخش‌ها (تنها فصول، بخش‌ها و زیربخش‌ها)
+\setcounter{secnumdepth}{2}
+\setcounter{tocdepth}{2}
+
+% بسته‌های ریاضی و نمادها
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{amsfonts}
+\usepackage{mathtools}
+
+% بسته‌های درج تصاویر، نمودارها و رنگ‌ها
+\usepackage{graphicx}
+\usepackage{xcolor}
+\usepackage{tikz}
+\usetikzlibrary{shapes.geometric, arrows.meta, positioning, calc, fit, backgrounds}
+\usepackage{eso-pic}
+
+% بسته‌های جداول پیشرفته
+\usepackage{booktabs}
+\usepackage{tabularx}
+\usepackage{multirow}
+\usepackage{array}
+\usepackage{float}
+\usepackage{caption}
+\usepackage{subcaption}
+
+% بسته‌های نمایش کد و الگوریتم
+\usepackage{listings}
+\usepackage{tcolorbox}
+\tcbuselibrary{skins, breakable}
+
+% تنظیمات سربرگ و پانویس (Header & Footer)
+\usepackage{fancyhdr}
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[R]{\small\slshape \leftmark}
+\fancyhead[L]{\small\thepage}
+\fancyfoot[C]{}
+\renewcommand{\headrulewidth}{0.6pt}
+\renewcommand{\footrulewidth}{0pt}
+
+% استایل صفحات ابتدایی فصل‌ها
+\fancypagestyle{plain}{
+    \fancyhf{}
+    \fancyfoot[C]{\small\thepage}
+    \renewcommand{\headrulewidth}{0pt}
+}
+
+% تعریف کادربندی ظریف دور صفحه (مطابق با کادربندی موجود در PSA1_FP_Report)
+\AddToShipoutPictureBG{%
+  \begin{tikzpicture}[remember picture, overlay]
+    \draw[line width=0.6pt, color=gray!80]
+      ($(current page.north west) + (1.2cm, -1.2cm)$)
+      rectangle
+      ($(current page.south east) + (-1.2cm, 1.2cm)$);
+  \end{tikzpicture}%
+}
+
+% تنظیمات لینک‌ها و بوکمارک‌های پی‌دی‌اف
+\usepackage{hyperref}
+\hypersetup{
+    pdfpagelabels=false,
+    colorlinks=true,
+    linkcolor=blue!75!black,
+    citecolor=green!60!black,
+    urlcolor=blue!85!black,
+    filecolor=magenta,
+    pdfstartview={FitH},
+    pdfauthor={محمد مهدی دوست محمدی},
+    pdftitle={طراحی سیستم تأمین داده جهت استنتاج WCET},
+    pdfsubject={پایان‌نامه کارشناسی مهندسی برق - الکترونیک},
+    pdfkeywords={WCET, ARM Cortex-M7, ETM, CoreSight, OpenCSD, STM32H7, Instruction Trace}
+}
+
+% تنظیمات نمایش کدهای برنامه‌نویسی (C, Python, Assembly)
+\definecolor{codegreen}{rgb}{0,0.6,0}
+\definecolor{codegray}{rgb}{0.5,0.5,0.5}
+\definecolor{codepurple}{rgb}{0.58,0,0.82}
+\definecolor{backcolour}{rgb}{0.97,0.97,0.97}
+
+\lstdefinestyle{customc}{
+    backgroundcolor=\color{backcolour},
+    commentstyle=\color{codegreen},
+    keywordstyle=\color{blue}\bfseries,
+    numberstyle=\tiny\color{codegray},
+    stringstyle=\color{codepurple},
+    basicstyle=\ttfamily\footnotesize,
+    breakatwhitespace=false,
+    breaklines=true,
+    captionpos=b,
+    keepspaces=true,
+    numbers=left,
+    numbersep=5pt,
+    showspaces=false,
+    showstringspaces=false,
+    showtabs=false,
+    tabsize=2,
+    frame=single,
+    rulecolor=\color{black!20}
+}
+\lstset{style=customc}
+
+% سازگاری کرنل جدید لاتک با ماژول‌های bidi در TeX Live 2026
+\providecommand{\UseMathForPositioningText}{}
+\providecommand{\UseTaggingSocket}[1]{}
+
+% نادیده‌گرفتن نویسه نامرئی U+200F جهت سازگاری با فونت‌های تک‌فاصله
+\usepackage{newunicodechar}
+\newunicodechar{‏}{}
+
+% ------------------------------------------------------------------------------
+% بسته زی‌پرشین (باید همواره آخرین بسته فراخوانی‌شده باشد)
+% ------------------------------------------------------------------------------
+\usepackage{xepersian}
+
+% تنظیم قلم‌های استاندارد زبان فارسی و انگلیسی (دو سایز بزرگتر و خواناتر)
+\settextfont[
+    Path=fonts/,
+    BoldFont=BNaznnBd.ttf,
+    Scale=1.22
+]{BNazanin.ttf}
+\setlatintextfont[Scale=1.1]{Times New Roman}
+
+% تعریف قلم‌های سفارشی تیتر و عناوین
+\defpersianfont\titr[
+    Path=fonts/,
+    Scale=1.28
+]{BTitrBd.ttf}
+
+\defpersianfont\zar[
+    Path=fonts/,
+    BoldFont=BZarBd.ttf,
+    Scale=1.22
+]{BZar.ttf}
+
+% افزایش عمومی فاصله بین خطوط در سرتاسر متن پایان‌نامه
+\linespread{1.35}
+
+% ارقام فارسی در محیط‌های متنی و ریاضی
+\SepMark{.}
+
+% نمادهای بالت استاندارد با قلم ریاضی (جلوگیری از گلیف ناموجود در قلم متن فارسی)
+\renewcommand{\labelitemi}{\ensuremath{\bullet}}
+\renewcommand{\labelitemii}{\ensuremath{\circ}}
+\renewcommand{\labelitemiii}{\ensuremath{\ast}}
+\renewcommand{\labelitemiv}{\ensuremath{\cdot}}
+
+% اصلاح عنوان مراجع برای جلوگیری از فونت ناموجود در سربرگ‌های لاتین
+\renewcommand{\bibname}{مراجع}

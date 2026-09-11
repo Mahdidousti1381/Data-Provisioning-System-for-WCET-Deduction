@@ -1,0 +1,28 @@
+% ==============================================================================
+% چکیده انگلیسی (English Abstract)
+% ==============================================================================
+
+\begin{latin}
+\newpage
+\thispagestyle{plain}
+\vspace*{-1.5cm}
+
+\begin{center}
+    {\large\bfseries Abstract}
+\end{center}
+\vspace{-0.2cm}
+
+\noindent
+\small
+In safety-critical and hard real-time embedded systems, accurate and dependable estimation of Worst-Case Execution Time (WCET) is paramount to guaranteeing temporal correctness and schedulability. In modern processors with deep pipelines, dynamic branch prediction, and multi-level caches, static analysis often yields overly pessimistic bounds, whereas conventional software instrumentation perturbs original execution timing by introducing non-negligible overheads (the probe effect). This thesis presents the design, experimental realization, and rigorous validation of an end-to-end, non-intrusive instruction trace data provisioning pipeline tailored for cycle-accurate WCET deduction.
+
+\medskip\noindent
+The proposed system leverages the on-chip Embedded Trace Macrocell (ETMv4) within the ARM CoreSight debug and trace architecture on an advanced ARM Cortex-M7 microcontroller (STM32H750). Low-level hardware configuration hurdles, including access lock removal, power/clock domain routing, and silicon-level reference manual errata, are addressed. Highly compressed instruction trace streams are exported across a 4-bit parallel bus via the Trace Port Interface Unit (TPIU) without imposing any CPU execution overhead, and captured via a commercial digital logic analyzer utilizing a 10$\times$ oversampling strategy. A dedicated host software engine (\texttt{TraceStreamProcessor.py}) performs physical edge-detection, TPIU frame alignment, and glitch suppression to synthesize industry-standard OpenCSD snapshots. By correlating the trace stream with the firmware ELF binary, the exact instruction execution trajectory, cycle-accurate timing stamps, and interrupt boundaries are fully reconstructed.
+
+\medskip\noindent
+To bridge the gap between low-level trace engineering and developer usability, a custom VS Code extension named \textbf{CoreSight Trace Studio} was designed and implemented. Structured as a three-stage, sequential, and semi-automated workflow, the extension facilitates hardware driver deployment, non-intrusive trace window injection into C source files, synchronized snapshot manifest generation, and execution trajectory log visualization within a modern dashboard. Experimental evaluations validate the pipeline across demanding benchmarks, including a periodic 100~$\mu\text{s}$ timer interrupt exhibiting sub-microsecond jitter ($0.1~\mu\text{s}$) that mathematically proves zero temporal intrusion, physical signal waveform synchronization, and multi-routine interrupt tracking via hardware handshaking. Operating in synergy with a companion automated testing framework, this platform delivers an accessible, cost-effective, and efficient solution for embedded software testing and safety assessment, holding strong potential to emerge as a viable alternative to commercial international testing tools.
+
+\vspace{0.4cm}
+\noindent
+\textbf{Keywords:} Worst-Case Execution Time (WCET), Non-intrusive Instruction Trace, ETMv4, ARM CoreSight, Cortex-M7, STM32H7, OpenCSD, CoreSight Trace Studio, Hard Real-Time Systems.
+\end{latin}

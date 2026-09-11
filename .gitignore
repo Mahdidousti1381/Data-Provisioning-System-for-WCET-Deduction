@@ -1,0 +1,52 @@
+# ==============================================================================
+# Git Ignore - CoreSight Trace Framework Deliverables
+# ==============================================================================
+
+# OS generated files
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+.DS_Store
+
+# C/C++ & Embedded intermediate build objects
+*.o
+*.d
+*.su
+*.cyclo
+
+# Python artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+venv/
+env/
+*.venv/
+
+# Editor & IDE settings
+.idea/
+*.swp
+*.swo
+*~
+
+# LaTeX auxiliary build files (keeps Thesis_LaTeX_Source clean)
+*.aux
+*.log
+*.out
+*.toc
+*.synctex.gz
+*.fls
+*.fdb_latexmk
+*.bbl
+*.blg
+*.lof
+*.lot
+*.bcf
+*.run.xml
+*.nav
+*.snm
+*.vrb
+
+# Node / Extension dependencies (if installed locally)
+node_modules/

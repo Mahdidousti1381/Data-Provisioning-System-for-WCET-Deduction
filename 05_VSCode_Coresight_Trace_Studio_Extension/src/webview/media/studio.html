@@ -1,0 +1,376 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CoreSight Trace Studio</title>
+    <link rel="stylesheet" href="{{styleUri}}">
+</head>
+<body>
+    <div class="studio-container">
+        <!-- Header -->
+        <header class="studio-header">
+            <div class="header-branding">
+                <div class="header-icon">⚡</div>
+                <div>
+                    <h1>CoreSight Trace Studio</h1>
+                    <p class="subtitle">ARM CoreSight & ETMv4 Hardware Trace Toolkit for STM32</p>
+                </div>
+            </div>
+            <div class="header-badges">
+                <span class="badge badge-pulse" id="globalStatusBadge">Active Workspace</span>
+            </div>
+        </header>
+
+        <!-- Navigation Tabs -->
+        <nav class="studio-tabs">
+            <button class="tab-btn active" data-tab="tab-instrumentation">
+                <span class="tab-icon">🛠️</span> 1. Instrumentation & Driver
+            </button>
+            <button class="tab-btn" data-tab="tab-snapshot">
+                <span class="tab-icon">⚙️</span> 2. Snapshot & Device Config
+            </button>
+            <button class="tab-btn" data-tab="tab-decoder">
+                <span class="tab-icon">🔍</span> 3. Trace Decoder & WCET
+            </button>
+        </nav>
+
+        <!-- TAB 1: Instrumentation & Driver -->
+        <main id="tab-instrumentation" class="tab-pane active">
+            <!-- Hardware Driver Status Card -->
+            <section class="card">
+                <div class="card-header">
+                    <h2>📦 Hardware Drivers (ETMv4 Driver Files)</h2>
+                    <span class="card-hint">CoreSight low-level driver templates</span>
+                </div>
+                <div class="card-body">
+                    <p class="info-text">
+                        Deploy verified ARM CoreSight register configuration routines (TPIU, ETF, CSTF, TSG, ETMv4, DWT) to your embedded project.
+                    </p>
+                    <div class="status-grid">
+                        <div class="status-item">
+                            <span class="status-label">ETMv4.c:</span>
+                            <span id="badgeC" class="status-pill pill-unknown">Checking...</span>
+                        </div>
+                        <div class="status-item">
+                            <span class="status-label">ETMv4.h:</span>
+                            <span id="badgeH" class="status-pill pill-unknown">Checking...</span>
+                        </div>
+                        <div class="status-item">
+                            <span class="status-label">#include in main.c:</span>
+                            <span id="badgeInclude" class="status-pill pill-unknown">Checking...</span>
+                        </div>
+                    </div>
+                    <div class="btn-group">
+                        <button id="btnAddDrivers" class="btn btn-primary">
+                            <span>📥</span> Add ETMv4 Driver Files to Project
+                        </button>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Code Instrumentation Card -->
+            <section class="card">
+                <div class="card-header">
+                    <h2>🎯 Code Instrumentation (Trace Window Injection)</h2>
+                    <span class="card-hint">Inject start/stop gating and initialization</span>
+                </div>
+                <div class="card-body">
+                    <div class="form-group">
+                        <label for="targetSrcFile">Target C Source File:</label>
+                        <div class="input-with-btn">
+                            <input type="text" id="targetSrcFile" placeholder="e.g. Core/Src/main.c">
+                            <button id="btnBrowseSrcFile" class="btn btn-secondary">Browse</button>
+                        </div>
+                    </div>
+
+                    <div class="instrument-actions-grid">
+                        <!-- Action 1: Config -->
+                        <div class="action-card">
+                            <h3>1. Hardware Initialization</h3>
+                            <p>Injects <code>Parallel_Trace_configure();</code> inside <code>main()</code>.</p>
+                            <div class="form-group inline-group">
+                                <label for="configLine">Line (optional):</label>
+                                <input type="number" id="configLine" placeholder="Auto in main()" min="1">
+                            </div>
+                            <button id="btnInjectConfig" class="btn btn-secondary">Inject Config Function</button>
+                        </div>
+
+                        <!-- Action 2: Start/Stop Selected -->
+                        <div class="action-card">
+                            <h3>2. Trace Active Selection</h3>
+                            <p>Select code in VS Code editor, then click below to wrap with <code>StartPoint()</code> and <code>StopPoint()</code>.</p>
+                            <button id="btnWrapSelection" class="btn btn-accent">Wrap Editor Selection</button>
+                        </div>
+
+                        <!-- Action 3: Line Range -->
+                        <div class="action-card">
+                            <h3>3. Trace Specific Line Range</h3>
+                            <p>Specify line numbers to surround with the trace measurement window.</p>
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label for="fromLine">From Line:</label>
+                                    <input type="number" id="fromLine" placeholder="Start" min="1">
+                                </div>
+                                <div class="form-group">
+                                    <label for="toLine">To Line:</label>
+                                    <input type="number" id="toLine" placeholder="End" min="1">
+                                </div>
+                            </div>
+                            <button id="btnWrapLines" class="btn btn-secondary">Wrap Line Range</button>
+                        </div>
+                    </div>
+                </div>
+            </section>
+        </main>
+
+        <!-- TAB 2: Snapshot & Device Config -->
+        <main id="tab-snapshot" class="tab-pane">
+            <section class="card">
+                <div class="card-header">
+                    <h2>📂 Capture & Firmware Files</h2>
+                    <span class="card-hint">Inputs for OpenCSD snapshot creation</span>
+                </div>
+                <div class="card-body">
+                    <div class="form-group">
+                        <label for="captureFilePath">Logic Analyzer Parallel Trace Capture (.csv / .bin): <span class="required">*</span></label>
+                        <div class="input-with-btn">
+                            <input type="text" id="captureFilePath" placeholder="Select exported CSV or wire binary">
+                            <button id="btnBrowseCapture" class="btn btn-secondary">Browse CSV/BIN</button>
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="elfFilePath">Matching Firmware Binary (.elf): <span class="hint">(Required for instruction disassembly)</span></label>
+                        <div class="input-with-btn">
+                            <input type="text" id="elfFilePath" placeholder="Select compiled firmware .elf">
+                            <button id="btnBrowseElf" class="btn btn-secondary">Browse ELF</button>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <section class="card">
+                <div class="card-header">
+                    <h2>🎛️ CoreSight & ETMv4 Configuration (device1.ini & device2.ini)</h2>
+                    <span class="card-hint">Read-only silicon IDs are automatically handled</span>
+                </div>
+                <div class="card-body">
+                    <div class="config-columns">
+                        <!-- Processor Column -->
+                        <div class="config-col">
+                            <h3 class="col-title">🖥️ Processor Description (<code>device1.ini</code>)</h3>
+                            <div class="form-group">
+                                <label for="coreName">Core Name:</label>
+                                <input type="text" id="coreName" value="Cortex-M7_0">
+                            </div>
+                            <div class="form-group">
+                                <label for="coreType">Core Profile / Type:</label>
+                                <input type="text" id="coreType" value="ARMv7-M">
+                                <span class="field-hint">ARMv7-M for Cortex-M7 (required by OpenCSD)</span>
+                            </div>
+                            <div class="form-group">
+                                <label for="initialPC">Initial PC (Entry Address):</label>
+                                <input type="text" id="initialPC" value="0x08000000">
+                            </div>
+                        </div>
+
+                        <!-- ETM Column -->
+                        <div class="config-col">
+                            <h3 class="col-title">📡 ETMv4 Configuration (<code>device2.ini</code>)</h3>
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label for="traceId">Trace ID (ATB ID):</label>
+                                    <input type="number" id="traceId" value="62" min="1" max="127">
+                                    <span class="field-hint">0x3E = 62</span>
+                                </div>
+                                <div class="form-group">
+                                    <label for="cycleThreshold">CC Threshold (TRCCCCTLR):</label>
+                                    <input type="number" id="cycleThreshold" value="64" min="4" max="4096">
+                                    <span class="field-hint">Min 4 cycles</span>
+                                </div>
+                            </div>
+
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label for="syncPeriod">Sync Period (TRCSYNCPR):</label>
+                                    <input type="number" id="syncPeriod" value="10" min="8" max="20">
+                                    <span class="field-hint" id="syncPeriodHint">2^10 = 1024 bytes <span class="text-warning">(Read-Only on STM32H7)</span></span>
+                                </div>
+                                <div class="form-group">
+                                    <label for="viewInstMode">ViewInst Mode:</label>
+                                    <select id="viewInstMode">
+                                        <option value="dwt_gated" selected>DWT Start/Stop Gated</option>
+                                        <option value="unconditional">Unconditional (Trace All)</option>
+                                    </select>
+                                </div>
+                            </div>
+
+                            <div class="checkbox-group">
+                                <label class="checkbox-label">
+                                    <input type="checkbox" id="enableCCI" checked>
+                                    <span>Enable Cycle Count Insertion (CCI / TRCCONFIGR bit 4)</span>
+                                </label>
+                                <label class="checkbox-label">
+                                    <input type="checkbox" id="enableTS" checked>
+                                    <span>Enable Timestamp Generation (TS / TRCCONFIGR bit 11)</span>
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="card-footer">
+                        <div class="btn-group">
+                            <button id="btnApplyEtmConfig" class="btn btn-secondary btn-large">
+                                <span>💾</span> Apply to ETMv4.c Driver
+                            </button>
+                            <button id="btnGenerateSnapshot" class="btn btn-primary btn-large">
+                                <span>🚀</span> Generate OpenCSD Snapshot Directory
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Snapshot Console Output -->
+            <section class="card">
+                <div class="card-header">
+                    <h2>📜 Snapshot Generation Log</h2>
+                    <button id="btnClearSnapLog" class="btn btn-small">Clear</button>
+                </div>
+                <div class="terminal-container">
+                    <pre id="snapTerminal" class="terminal-output">Ready to process trace capture...</pre>
+                </div>
+            </section>
+        </main>
+
+        <!-- TAB 3: Trace Decoder & WCET -->
+        <main id="tab-decoder" class="tab-pane">
+            <section class="card">
+                <div class="card-header">
+                    <h2>📂 Decoder Inputs & Execution Engine</h2>
+                    <span class="card-hint">Run OpenCSD or Python Decoder</span>
+                </div>
+                <div class="card-body">
+                    <div class="form-group">
+                        <label for="decodeSnapshotPath">Snapshot Directory (or snapshot.ini): <span class="required">*</span></label>
+                        <div class="input-with-btn">
+                            <input type="text" id="decodeSnapshotPath" placeholder="Select generated snapshot folder">
+                            <button id="btnBrowseSnapshot" class="btn btn-secondary">Browse Snapshot</button>
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="decodeElfPath">Firmware ELF (for instruction symbol matching):</label>
+                        <div class="input-with-btn">
+                            <input type="text" id="decodeElfPath" placeholder="Select firmware .elf">
+                            <button id="btnBrowseDecodeElf" class="btn btn-secondary">Browse ELF</button>
+                        </div>
+                    </div>
+
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="decoderType">Decoder Backend:</label>
+                            <select id="decoderType">
+                                <option value="python_decoder" selected>Python Decoder (TempDecoder_V0.2.py)</option>
+                                <option value="trc_pkt_lister">OpenCSD trc_pkt_lister (Native / Path)</option>
+                                <option value="wsl_trc_pkt_lister">OpenCSD via WSL (Linux trc_pkt_lister)</option>
+                            </select>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="coreFreqMhz">Core Clock Frequency (MHz):</label>
+                            <input type="number" id="coreFreqMhz" value="480" min="1" max="1000">
+                            <span class="field-hint">Used for WCET calculation (STM32H7 = 480 MHz)</span>
+                        </div>
+                    </div>
+
+                    <div class="checkbox-group inline-checkboxes">
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="decodeInstructions" checked>
+                            <span>Disassemble Instructions (-decode)</span>
+                        </label>
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="decodeOnly">
+                            <span>Suppress Raw Packets (-decode_only)</span>
+                        </label>
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="decodeStats" checked>
+                            <span>Display Statistics (-stats)</span>
+                        </label>
+                    </div>
+
+                    <div class="card-footer">
+                        <div class="btn-group">
+                            <button id="btnRunDecoder" class="btn btn-primary btn-large">
+                                <span>▶️</span> Run Trace Decoder & Compute WCET
+                            </button>
+                            <button id="btnExportReport" class="btn btn-secondary btn-large">
+                                <span>📊</span> Export Analysis Report (HTML & MD)
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Metrics Analytics Bar -->
+            <section class="metrics-grid">
+                <div class="metric-card">
+                    <span class="metric-title">Instructions Decoded</span>
+                    <span id="metricInstructions" class="metric-value">0</span>
+                    <span class="metric-sub">num_i executed</span>
+                </div>
+                <div class="metric-card">
+                    <span class="metric-title">Total Clock Cycles</span>
+                    <span id="metricCycles" class="metric-value">0</span>
+                    <span class="metric-sub">CCI cycle packets</span>
+                </div>
+                <div class="metric-card">
+                    <span class="metric-title">Execution Time (WCET)</span>
+                    <span id="metricTime" class="metric-value">0 µs</span>
+                    <span class="metric-sub">at specified core freq</span>
+                </div>
+                <div class="metric-card">
+                    <span class="metric-title">Average CPI</span>
+                    <span id="metricCpi" class="metric-value">0.00</span>
+                    <span class="metric-sub">Cycles / Instruction</span>
+                </div>
+                <div class="metric-card">
+                    <span class="metric-title">Branch Atoms</span>
+                    <span id="metricAtoms" class="metric-value">0</span>
+                    <span class="metric-sub">I_ATOM count</span>
+                </div>
+            </section>
+
+            <!-- Decoder Live Terminal -->
+            <section class="card">
+                <div class="card-header">
+                    <h2>📜 Decoder Console & Disassembly Log</h2>
+                    <div class="terminal-controls">
+                        <span id="decoderStatusPill" class="status-pill pill-idle">Idle</span>
+                        <button id="btnClearDecodeLog" class="btn btn-small">Clear</button>
+                    </div>
+                </div>
+                <div id="decoderExportBanner" class="export-banner" style="display: none;">
+                    <div class="export-banner-info">
+                        <span class="export-icon">📄</span>
+                        <div>
+                            <div class="export-title">Exported Trace Disassembly:</div>
+                            <div id="decoderExportFileName" class="export-filename">snapshot_decoded_1.ppl</div>
+                        </div>
+                    </div>
+                    <div class="btn-group">
+                        <button id="btnOpenExportedFile" class="btn btn-small btn-primary">Open Disassembly</button>
+                        <button id="btnBannerExportReport" class="btn btn-small btn-secondary">📊 Export Report</button>
+                    </div>
+                </div>
+                <div class="terminal-container">
+                    <div id="decoderTerminal" class="terminal-output">Ready to decode snapshot...</div>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <script src="{{scriptUri}}"></script>
+</body>
+</html>

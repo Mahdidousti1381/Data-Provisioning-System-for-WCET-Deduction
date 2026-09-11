@@ -1,0 +1,330 @@
+% ==============================================================================
+% فصل سوم: معماری کلان سامانه
+% ==============================================================================
+
+\chapter{معماری کلان سامانه}
+\label{ch:architecture}
+
+\section{مقدمه}
+طراحی و پیاده‌سازی یک خط‌لوله داده جهت استنتاج بدترین حالت زمان اجرا (\lr{WCET}) در سامانه‌های نهفته بی‌درنگ، نیازمند اتخاذ تصمیمات بنیادین معماری، تفکیک دقیق وظایف میان زیرسیستم‌های سخت‌افزاری و نرم‌افزاری، و ایجاد یک بستر عملیاتی بدون سربار است. در این فصل، ابتدا مسیر تکامل پژوهش و دلایل فنی گذار از بردهای مبتنی بر \lr{RP2350} به میکروکنترلر صنعتی \lr{STM32H750} تبیین می‌گردد. سپس نیازمندی‌های کارکردی و کیفی سامانه استخراج شده و معماری کلان سامانه به همراه نحوه تعامل و تبادل داده با سامانه آزمون خودکار (پروژه مکمل) با جزئیات فنی تشریح می‌شود.
+
+\section{مسیر تکامل سخت‌افزار: از \lr{RP2350 (Pico 2)} تا \lr{STM32H750}}
+\label{sec:arch_evolution}
+در فاز مطالعاتی اولیه این پژوهش، تمرکز بر بهره‌گیری از میکروکنترلر نوین \lr{Raspberry Pi Pico 2} (مبتنی بر تراشه \lr{RP2350}) قرار داشت. تراشه \lr{RP2350} با ساختار دوهسته‌ای ترکیبی (\lr{ARM Cortex-M33} و \lr{Hazard3 RISC-V}) گزینه‌ای جذاب و اقتصادی به نظر می‌رسید. هدف اولیه، راه‌اندازی واحد \lr{ETM} موجود در هسته \lr{Cortex-M33} و خواندن داده‌های ردگیری از طریق یک لایه میان‌افزار (\lr{Middleware}) یا اسکریپت‌های کامپایلر بود؛ به نحوی که کد اصلی کاربر به زبان \lr{C} کاملاً دست‌نخورده باقی بماند.
+
+با این حال، در جریان پیشبرد عملیاتی این راهکار، موانع فنی بازدارنده‌ای شناسایی گردید:
+\begin{enumerate}
+    \item \textbf{نقص مستندات و ناپختگی تراشه \lr{RP2350}:} با توجه به عرضه بسیار جدید تراشه \lr{RP2350}، مستندات رسمی مربوط به ثبّات‌های نگاشت‌شده درگاه‌های عیب‌یابی \lr{CoreSight}، ماتریس اتصال سوییچ‌های \lr{ATB}، و ساختار داخلی \lr{ETM} در زمان اجرای پروژه بسیار محدود، ناقص و همراه با اراتا‌های سخت‌افزاری متعدد بود.
+    \item \textbf{عدم دسترسی به پایه‌های فیزیکی \lr{Trace} در بردهای تجاری:} بزرگ‌ترین چالش فیزیکی، عدم هدایت پایه‌های موازی \lr{TPIU} به پین‌هدرهای خروجی برد تجاری \lr{Pico 2} بود. بردهای توسعه تجاری تنها پایه‌های دو سیمه \lr{SWD} و پورت سریال \lr{UART} را به بیرون هدایت کرده بودند؛ در حالی که پورت ردیابی پیوسته نیازمند دسترسی بدون واسطه به حداقل ۵ پایه سخت‌افزاری \lr{Trace} (یک کلاک و ۴ خط داده) بود. دسترسی به این پایه‌ها نیازمند لحیم‌کاری‌های میکرومتری روی پکیج \lr{QFN} بود که ریسک نویز، عدم تطبیق امپدانس و ناپایداری سیگنال را به شدت افزایش می‌داد.
+    \item \textbf{محدودیت شدید پهنای باند و بافر ذخیره‌سازی در \lr{RP2350}:} در تراشه رزبری پای، پهنای باند و حافظه بافر اختصاصی سخت‌افزاری برای ذخیره‌سازی و خروجی دادن داده‌های \lr{Trace} بسیار محدود است. این گلوگاه موجب می‌شد که استخراج داده‌های ردیابی مستلزم مداخله نرم‌افزاری در روند اجرای برنامه و درگیر کردن یکی از هسته‌های پردازنده به عنوان واسط ذخیره‌سازی یا ارسال داده باشد. این درگیرسازی نرم‌افزاری و اشغال هسته، شرط بنیادین عدم مداخله و اصل غیرتهاجمی بودن (\lr{Non-intrusive}) را کاملاً نقض می‌کرد و رفتار زمانی سیستم را به شکل نامطلوبی تغییر می‌داد.
+    \item \textbf{جامعیت و بلوغ صنعتی خانواده \lr{STM32}:} در سوی مقابل، شرکت \lr{STMicroelectronics} در خانواده میکروکنترلرهای مبتنی بر \lr{ARM Cortex-M7} (به‌ویژه سری \lr{STM32H750}) ساختار استاندارد، بالغ و کاملاً مستندشده \lr{CoreSight ETMv4} را ارائه می‌دهد. در این پردازنده‌ها، پایه‌های پورت موازی \lr{TPIU} به عنوان توابع جانبی جایگزین (\lr{Alternate Function 0}) بر روی پورت \lr{E} (پایه‌های \lr{\texttt{PE2}} الی \lr{\texttt{PE6}}) تعبیه شده‌اند و دسترسی سخت‌افزاری کاملاً پایدار را ممکن می‌سازند.
+\end{enumerate}
+
+بنابراین، تصمیم راهبردی معماری بر گذار کامل به میکروکنترلر \lr{STM32H750VBT6} اتخاذ گردید تا تمرکز پژوهش بر هسته علمی استنتاج غیرتهاجمی و پردازش سیگنال‌های \lr{Trace} متمرکز بماند.
+
+\section{تحلیل جامع نیازمندی‌های سامانه}
+برای تضمین صحت عملکرد در محیط‌های بی‌درنگ سخت، نیازمندی‌های سامانه در دو دسته کارکردی و کیفی تدوین گردید:
+
+\subsection{نیازمندی‌های کارکردی (\lr{Functional Requirements})}
+\begin{enumerate}
+    \item \textbf{پیکربندی غیرتهاجمی زیرسیستم \lr{CoreSight}:} فعال‌سازی، تنظیم ثبّات‌های کنترلی، باز کردن قفل دسترسی (\lr{LAR}) و تعیین فیلترهای رویداد بدون تزریق حتی یک خط کد اضافه به باینری نرم‌افزار هدف.
+    \item \textbf{پیکربندی جامع و مناسب تمامی بلوک‌های زنجیره \lr{Trace}:} مقداردهی هماهنگ و سازگار کلیه واحدهای سخت‌افزاری فعال در خط‌لوله شامل \lr{DBGMCU}، \lr{TPIU}، قیف ادغام داده‌ها (\lr{CSTF}) و هسته \lr{ETMv4} بدون ایجاد تناقض یا بن‌بست در جریان داده‌ها.
+    \item \textbf{قابلیت تنظیم محل و طول پنجره ردیابی توسط کاربر:} فراهم ساختن امکان تعیین دقیق نقاط شروع و پایان فرآیند ردگیری (تعیین پنجره زمانی یا بازه آدرس‌های اجرایی هدف) توسط کاربر، جهت متمرکز شدن بر بخش‌های بحرانی کد و بهینه‌سازی حجم داده‌های ثبتی.
+    \item \textbf{هدایت موازی جریان \lr{Trace} از پورت فیزیکی \lr{TPIU}:} ارسال بایت‌های فشرده‌شده داده از طریق رابط ۵ سیمه سنکرون (\lr{TRACECLK} و \lr{TRACED[0:3]}).
+    \item \textbf{بازسازی دقیق جریان بیت‌ها به بایت‌های پروتکل:} نمونه‌برداری با فرکانس متناسب، آشکارسازی لبه‌ها و بازیابی جفت‌نیبل‌های فریم‌بندی‌شده.
+    \item \textbf{همگام‌سازی اجباری در پنجره‌های کوتاه آزمون:} حل چالش عدم همگام‌سازی (\lr{A-Sync}) در روتین‌های وقفه و توابع میکروثانیه‌ای.
+    \item \textbf{بازسازی جریان کامل دستورات با موتور استاندارد:} ادغام با کتابخانه صنعتی \lr{OpenCSD}، نگاشت نمادهای فایل باینری (\lr{ELF})، و استخراج گام‌به‌گام دستورات اسمبلی.
+    \item \textbf{شمارش دقیق چرخه‌های پردازنده (\lr{Cycle-Accurate Timing}):} انتساب برچسب زمانی و چرخه‌های کلاک سپری‌شده به هر بلوک محاسباتی و روتین‌های وقفه.
+\end{enumerate}
+
+\subsection{نیازمندی‌های کیفی و غیرکارکردی (\lr{Non-Functional Requirements})}
+\begin{itemize}
+    \item \textbf{عدم قطعیت و جیتر صفر (\lr{Zero Jitter}):} سیستم مانیتورینگ نباید رفتار زمانی پردازنده را متغیر سازد؛ زمان‌های اندازه‌گیری‌شده در شرایط ورودی یکسان باید در سطح چرخه ماشین (\lr{Cycle-deterministic}) کاملاً تکرارپذیر باشند.
+    \item \textbf{نرخ خطای صفر در بازسازی (\lr{Zero Decode Error}):} از دست رفتن حتی یک بایت یا خطا در تصمیم یک انشعاب شرطی، کل مسیر اجرای پس از آن را نامعتبر می‌سازد؛ از این رو نرخ خطای رمزگشایی در سناریوهای طولانی باید اکیداً صفر باشد.
+    \item \textbf{قابلیت اتکا و کاهش هزینه سخت‌افزاری:} پرهیز از پروب‌های صنعتی انحصاری با قیمت چندهزار دلاری و جایگزینی آن با سخت‌افزارهای اقتصادی در دسترس.
+\end{itemize}
+
+\clearpage
+\section{معماری کلان و لایه‌های شش‌گانه سامانه}
+\label{sec:six_layers_arch}
+سامانه تأمین داده‌های ردیابی در قالب یک معماری شش‌لایه‌ای سلسله‌مراتبی مهندسی شده است. شکل \ref{fig:detailed_arch_flow} جریان تبدیل داده را از نانوثانیه‌های پالس‌های فیزیکی سیلیکون تا ماتریس‌های ساخت‌یافته تحلیل \lr{WCET} به تصویر می‌کشد.
+
+\begin{figure}[H]
+\centering
+\begin{latin}
+\centering
+\begin{tikzpicture}[
+    node distance=1.1cm,
+    layer/.style={rectangle, draw=blue!75!black, fill=blue!5, thick, rounded corners=4pt, text width=13.8cm, align=center, inner sep=3.5pt},
+    arrow/.style={-latex, very thick, draw=black!70}
+]
+    \node [layer] (L1) {
+        \rl{\textbf{لایه ۱: هسته محاسباتی و فشرده‌سازی درون‌تراشه}} \\
+        \lr{\textbf{(Layer 1: On-Chip Core \& ETMv4)}} \\[0.05cm]
+        \small \rl{اجرای برنامه‌های آزمون، پایش انشعاب‌ها توسط \lr{ETMv4}، تولید بسته‌های اتم، درج شمارنده‌های چرخه}
+    };
+    
+    \node [layer, below=0.35cm of L1] (L2) {
+        \rl{\textbf{لایه ۲: تعیین گذرگاه و فرمت‌بندی پورت}} \\
+        \lr{\textbf{(Layer 2: ATB / CSTF / TPIU)}} \\[0.05cm]
+        \small \rl{تعیین داده‌ها از طریق \lr{CSTF}، مدیریت بافر \lr{ETF}، تبدیل جریان به جفت‌نیبل و درج بایت همگام‌سازی \lr{\texttt{0x7F}}}
+    };
+    
+    \node [layer, below=0.35cm of L2] (L3) {
+        \rl{\textbf{لایه ۳: بستر فیزیکی و سیگنال‌های پین‌ها}} \\
+        \lr{\textbf{(Layer 3: Physical Trace Interface)}} \\[0.05cm]
+        \small \rl{پایه‌های پورت \lr{\texttt{PE2..PE6}}، انطباق امپدانس، کنترل نرخ صعود، و اتصال به پین‌های خروجی و سیم‌کشی \lr{Trace}}
+    };
+    
+    \node [layer, below=0.35cm of L3] (L4) {
+        \rl{\textbf{لایه ۴: دریافت و نمونه‌برداری لاجیک‌آنالایزر}} \\
+        \lr{\textbf{(Layer 4: 10x Oversampled Logic Capture)}} \\[0.05cm]
+        \small \rl{دستگاه \lr{DSLogic U3Pro16}، نمونه‌برداری ۱۰ برابری نسبت به کلاک \lr{Trace}، حذف نویز و استخراج فایل نمونه‌های \lr{CSV}}
+    };
+    
+    \node [layer, below=0.35cm of L4] (L5) {
+        \rl{\textbf{لایه ۵: ماژول پردازش جریان \lr{Trace}}} \\
+        \lr{\textbf{(Layer 5: TraceStreamProcessor.py)}} \\[0.05cm]
+        \small \rl{آشکارسازی لبه‌های کلاک، تجمیع نیبل‌ها به بایت، اعتبارسنجی فریم‌های \lr{TPIU}، و ساختارمند کردن پوشه اسنپ‌شات \lr{OpenCSD}}
+    };
+    
+    \node [layer, below=0.35cm of L5] (L6) {
+        \rl{\textbf{لایه ۶: موتور رمزگشای مرجع و نگاشت کد}} \\
+        \lr{\textbf{(Layer 6: OpenCSD Engine \& Disassembly Matching)}} \\[0.05cm]
+        \small \rl{دیکود عمیق بسته‌ها، تطبیق با باینری \lr{ELF}، بازسازی مسیر اجرای دستورات و تحویل ماتریس به سامانه تحلیل \lr{WCET}}
+    };
+
+    \draw [arrow] (L1) -- (L2);
+    \draw [arrow] (L2) -- (L3);
+    \draw [arrow] (L3) -- (L4);
+    \draw [arrow] (L4) -- (L5);
+    \draw [arrow] (L5) -- (L6);
+\end{tikzpicture}
+\end{latin}
+\caption{معماری شش‌لایه‌ای سامانه تأمین داده از هسته سخت‌افزار تا موتور رمزگشایی}
+\label{fig:detailed_arch_flow}
+\end{figure}
+\clearpage
+
+\section{مرزبندی معماری و تعامل با سامانه آزمون خودکار (پروژه مکمل)}
+\label{sec:dual_arch_interaction}
+پروژه حاضر (سامانه تأمین داده‌های ردیابی) و پروژه مکمل (سامانه آزمون خودکار) به گونه‌ای طراحی شده‌اند که دو سامانه کاملاً ماژولار، تفکیک‌شده و با مرزبندی صریح معماری (\lr{Separation of Concerns}) باشند.
+
+\subsection{حفظ اصالت کدهای کاربر و بازنگاشت در لایه میانی}
+یکی از شروط بنیادین در ارزیابی رفتارهای زمانی سیستم‌های نهفته، اجتناب از دستکاری کد اصلی برنامه کاربر است. در پروژه مکمل، شبیه‌سازی و تحریک مقادیر پریفرال‌های خارجی بدون تغییر در کدهای اصلی کاربر و صرفاً از طریق بازتعریف توابع لایه میانی \lr{HAL} صورت گرفته است؛ به نحوی که ثبّات‌های پریفرال به بخش دیگری از حافظه بازنگاشت (\lr{Remap}) شده و داده‌های آزمون بدون نیاز به تغییر منطق سورس‌کد به برنامه خورانده می‌شوند.
+
+\subsection{استقلال عملیاتی و پروتکل تبادل داده}
+معماری و پارتیشن‌بندی میان این دو پروژه به گونه‌ای پیاده‌سازی شده است که کارکرد هر دو سامانه به طور کامل از یکدیگر مستقل باشد و ارتباط آن‌ها صرفاً به تبادل استاندارد داده محدود گردد. سامانه تأمین داده به عنوان یک ناظر سخت‌افزاری کاملاً مستقل عمل می‌کند که هیچ وابستگی به منطق آزمون ندارد؛ وظیفه این سامانه منحصراً ثبت سیگنال‌های فیزیکی، بازسازی جریان دستورات و تحویل ماتریس ساخت‌یافته ردگیری اجرای برنامه (\lr{Execution Trace Matrix}) است:
+\begin{equation}
+\label{eq:trace_matrix}
+\mathcal{M}_{\mathrm{trace}} = \left\{ \left( \mathrm{PC}_k, \; \Delta t_k, \; \mathrm{BranchTaken}_k, \; \mathrm{Context}_k \right) \right\}_{k=1}^{M}
+\end{equation}
+در این رابطه، $\mathrm{PC}_k$ آدرس ۳۲ بیتی شمارنده برنامه، $\Delta t_k$ تعداد چرخه‌های کلاک سپری‌شده بین رخدادها، $\mathrm{BranchTaken}_k$ وضعیت تحقق یا عدم تحقق انشعاب شرطی، و $\mathrm{Context}_k$ شناسه زمینه اجرایی پردازنده است. این ماتریس به عنوان خروجی رسمی سامانه تأمین داده در اختیار سامانه مکمل قرار می‌گیرد تا برای هدایت آزمون‌های بعدی و استنتاج بدترین حالت زمان اجرا (\lr{WCET}) به کار گرفته شود. مدل مفهومی مرزبندی معماری و نحوه تعامل بدون مداخله میان این دو سامانه در شکل \ref{fig:closed_loop_interaction} به تصویر کشیده شده است.
+
+\begin{figure}[H]
+\centering
+\begin{latin}
+\centering
+\begin{tikzpicture}[
+    box/.style={rectangle, draw=blue!80!black, fill=blue!5, thick, rounded corners=5pt, text width=5.6cm, align=center, minimum height=1.9cm, inner sep=4pt},
+    auxbox/.style={rectangle, draw=orange!80!black, fill=orange!5, thick, rounded corners=5pt, text width=5.6cm, align=center, minimum height=1.9cm, inner sep=4pt},
+    hwbox/.style={rectangle, draw=green!60!black, fill=green!5, thick, rounded corners=5pt, text width=14.2cm, align=center, minimum height=1.6cm, inner sep=4pt},
+    line/.style={draw=black!75, -latex, thick}
+]
+    \node [box] (provider) at (-4.3, 4.8) {
+        \rl{\textbf{سامانه تأمین داده‌های ردیابی}}\\[0.08cm]
+        \small \rl{ثبت سخت‌افزاری پایه‌های \lr{ETMv4}}\\[0.04cm]
+        \small \rl{پردازش با \lr{TraceStreamProcessor}}\\[0.04cm]
+        \small \rl{بازسازی جریان دستورات با \lr{OpenCSD}}
+    };
+    
+    \node [auxbox] (tester) at (4.3, 4.8) {
+        \rl{\textbf{سامانه آزمون خودکار (پروژه مکمل)}}\\[0.08cm]
+        \small \rl{تولید هدایت‌شده بردارهای ورودی}\\[0.04cm]
+        \small \rl{بازنگاشت ثبّات‌ها در لایه میانی \lr{HAL}}\\[0.04cm]
+        \small \rl{محاسبه و استنتاج \lr{WCET}}
+    };
+
+    \node [hwbox] (target) at (0, 0) {
+        \rl{\textbf{میکروکنترلر هدف صنعتی}}\\[0.06cm]
+        \lr{\textbf{STM32H750VBT6 (ARM Cortex-M7)}}\\[0.06cm]
+        \small \rl{اجرای کد دست‌نخورده کاربر و انتشار برخط پالس‌های \lr{Trace} از پایه‌های} \lr{\texttt{PE2..PE6}}
+    };
+
+    % Paths
+    \draw [line] (tester.south) -- node [left=0.15cm, midway, align=right, font=\scriptsize] {\rl{تزریق ورودی‌ها}\\\rl{به لایه میانی}} (tester.south |- target.north);
+    \draw [line] (provider.south |- target.north) -- node [right=0.15cm, midway, align=left, font=\scriptsize] {\rl{ردیابی سخت‌افزاری}\\\lr{TRACECLK + TRACED[0:3]}} (provider.south);
+    \draw [line, dashed] (provider.east) -- node [above=0.08cm, midway, align=center, font=\scriptsize] {\rl{ماتریس خروجی ردگیری}} node [below=0.08cm, midway, align=center, font=\scriptsize] {$\mathcal{M}_{\mathrm{trace}} \to \text{\rl{استنتاج}}\;\mathrm{WCET}$} (tester.west);
+\end{tikzpicture}
+\end{latin}
+\caption{مدل مرزبندی معماری و تبادل داده میان سامانه تأمین داده و سامانه آزمون مکمل}
+\label{fig:closed_loop_interaction}
+\end{figure}
+
+\section{معماری نهایی سامانه}
+\label{sec:final_system_architecture}
+پیرو تحلیل نیازمندی‌ها، تفکیک لایه‌های شش‌گانه پردازش داده و تبیین مدل مرزبندی با سامانه آزمون مکمل، پیکربندی عملیاتی کل سیستم نیازمند یک بلوک‌دیاگرام جامع معماری است که مرزهای فیزیکی، جایگاه دقیق دستگاه‌های ابزاردقیق و اندازه‌گیری، و خط‌لوله پردازش نرم‌افزاری میزبان را به وضوح نشان دهد. ساختار عملیاتی سامانه در سه بخش بنیادین (سخت‌افزار هدف، لایه اندازه‌گیری و ابزاردقیق، و سامانه نرم‌افزاری میزبان) سازمان‌دهی شده است:
+
+\begin{enumerate}
+    \item \textbf{بخش اول: سخت‌افزار هدف تحت آزمون (\lr{Target Hardware / DUT}):}
+    میکروکنترلر صنعتی \lr{STM32H750VBT6} که مجهز به هسته محاسباتی پیشرفته \lr{ARM Cortex-M7} است. کدهای کاربر بدون نیاز به هیچ‌گونه ابزاردقیق نرم‌افزاری یا تزریق پروب‌های آلوده‌کننده زمان، با رفتار اصیل خود اجرا می‌شوند. ماژول آن‌چیپ \lr{ETMv4} با پایش بی‌درنگ خط‌لوله دستورات، اطلاعات شاخه‌ها (\lr{Atom Packets})، شمارنده چرخه‌ها (\lr{CCI}) و برچسب‌های زمانی سراسری (\lr{TS}) را تولید کرده و از طریق گذرگاه ۳۲ بیتی \lr{ATB} به سمت قيف ادغام داده‌ها (\lr{CSTF}) و بافر حلقوی \lr{ETF} گسیل می‌دارد. در نهایت، واحد واسط پورت ردیابی (\lr{TPIU}) این بسته‌ها را در فریم‌های ۱۶ بایتی استاندارد سازمان‌دهی نموده و به صورت یک گذرگاه موازی ۴ بیتی سنکرون (شامل پایه \lr{PE2} به عنوان کلاک خروجی \lr{TRACECLK} و پایه‌های \lr{PE3..PE6} به عنوان خطوط موازی داده \lr{TRACED[0:3]}) بدون تحمیل کوچک‌ترین سربار محاسباتی یا توقف هسته به بیرون صادر می‌کند.
+
+    \item \textbf{بخش دوم: تجهیزات اندازه‌گیری و ثبت فیزیکی سیگنال‌ها (\lr{Measurement \& Acquisition Instrumentation}):}
+    این بخش به عنوان پل واسط فیزیکی میان میکروکنترلر هدف و رایانه میزبان عمل می‌نماید و شامل مؤلفه‌های سخت‌افزاری زیر است:
+    \begin{itemize}
+        \item \textbf{پروب‌های پرسرعت با طول کم:} کابل‌های رابط شیلددار با طول کمتر از ۱۰ سانتی‌متر جهت جلوگیری از نوسانات پله‌ای (\lr{Ringing}) و انطباق امپدانس به پایه‌های پورت \lr{E} میکروکنترلر و پین‌های زمین مجاور متصل شده‌اند.
+        \item \textbf{دستگاه لاجیک‌آنالایزر سخت‌افزاری (\lr{DSLogic U3Pro16}):} ثبت الکتریکی سیگنال‌های فرکانس‌بالا بر عهده این ابزار صنعتی ۱۶ کاناله قرار دارد. این دستگاه با بهره‌گیری از یک بافر آن‌بورد ۲ گیگابیتی \lr{DDR3 DRAM} و استراتژی نمونه‌برداری ناهمگام ۱۰ برابری ($10\times$ \lr{Asynchronous Oversampling})، پالس‌های ساعت و داده را با دقت بسیار بالا ثبت کرده و اثرات جیتر و لغزش فاز را در مبدأ خنثی می‌سازد.
+        \item \textbf{درگاه پرسرعت \lr{USB 3.0}:} داده‌های نمونه‌برداری شده با پهنای باند بالای ۵ گیگابیت بر ثانیه و در مد استریم پیوسته و بدون سرریز، از لاجیک‌آنالایزر به رایانه میزبان منتقل می‌شوند.
+    \end{itemize}
+
+    \item \textbf{بخش سوم: سامانه نرم‌افزاری میزبان و رپر یکپارچه‌ساز (\lr{Host Processing System \& Studio Wrapper}):}
+    در رایانه میزبان (\lr{Host PC})، افزونه اختصاصی \lr{CoreSight Trace Studio} به عنوان یک محیط یکپارچه توسعه و رپر جامع (\lr{Toolchain Wrapper}) در محیط \lr{VS Code} عمل می‌کند. این ابزار به جای قرارگیری صرف در انتهای خط‌لوله، به عنوان یک چتر نرم‌افزاری دربرگیرنده کل مؤلفه‌های پردازشی عمل نموده و خط‌لوله را مدیریت می‌نماید:
+    \begin{itemize}
+        \item \textbf{موتور پیش‌پردازش پایتون (\lr{\texttt{TraceStreamProcessor.py}}):} فایل نمونه‌های خام لاجیک‌آنالایزر را دریافت و پردازش نموده، لبه‌های معتبر کلاک را با فیلتر هوشمند گلیچ استخراج می‌کند، نیبل‌های ۴ بیتی را به بایت‌های پروتکل تجمیع می‌نماید، فریم‌ها را بر پایه الگوهای \lr{FSYNC/HSYNC} تراز فاز می‌کند و با تفکیک سگمنت‌های بارگذاری از باینری \lr{ELF}، بسته اسنپ‌شات استاندارد \lr{OpenCSD} را تولید می‌نماید.
+        \item \textbf{موتور رمزگشای مرجع (\lr{OpenCSD Library}):} با فراخوانی مانیفست‌های اسنپ‌شات و اجرای ابزار استاندارد \lr{trc\_pkt\_lister}، جریان بسته‌های ردیابی و باینری برنامه را ادغام کرده و دنباله دقیق دستورات اسمبلی، برچسب‌های زمانی و شمارش چرخه‌ها را بازسازی می‌کند.
+        \item \textbf{کنسول کنترلی و داشبورد استودیو (\lr{Trace Studio Dashboard}):} این پوسته یکپارچه، فرآیند تزریق خودکار درایورها به کد منبع، نشانه‌گذاری پنجره‌های پایش، هماهنگی اجرای خط‌لوله و مصورسازی زنده شاخص‌های کلیدی کارایی (\lr{KPI}) نظیر تعداد دستورات، مجموع چرخه‌ها، میانگین \lr{CPI} و بیشینه زمان اجرا را در قالبی تعاملی محقق می‌سازد.
+    \end{itemize}
+\end{enumerate}
+
+خروجی نهایی این معماری، ماتریس جامع ردگیری اجرای برنامه ($\mathcal{M}_{\mathrm{trace}}$) است که به سامانه آزمون خودکار تحویل داده می‌شود تا به عنوان سنگ‌بنای ریاضی جهت استنتاج نهایی \lr{WCET} مورد بهره‌برداری قرار گیرد.
+
+شکل \ref{fig:final_full_architecture} معماری نهایی و انتها-به-انتهای پلتفرم تأمین داده را با نمایش رپر یکپارچه‌ساز \lr{CoreSight Trace Studio} و تعامل لایه‌ها به تصویر می‌کشد.
+
+\begin{figure}[H]
+\centering
+\begin{latin}
+\begin{tikzpicture}[
+    >=latex,
+    tierbox/.style={rectangle, draw=#1!75!black, fill=#1!3, thick, rounded corners=6pt, inner ysep=12pt, inner xsep=7pt},
+    tierbadge/.style={fill=white, draw=#1!80!black, thick, rounded corners=3pt, font=\bfseries\scriptsize, text=#1!40!black, inner sep=3pt},
+    mod/.style={rectangle, draw=#1!80!black, fill=white, thick, rounded corners=4pt, align=center, inner sep=5pt, font=\footnotesize},
+    bus/.style={draw=black!75, line width=1.3pt, ->},
+    databoot/.style={draw=blue!85!black, line width=1.5pt, ->},
+    buslabel/.style={font=\tiny, fill=white, inner sep=1.5pt, draw=gray!40, rounded corners=1pt},
+    signallabel/.style={font=\scriptsize\bfseries, align=center, fill=blue!5, inner sep=2.5pt, draw=blue!40, rounded corners=3pt}
+]
+
+    % =========================================================================
+    % TIER 1: Embedded Target Hardware (DUT)
+    % =========================================================================
+    \node [mod=green!60!black, text width=4.4cm, minimum height=2.1cm] (core) at (0, 0) {
+        \textbf{Processor Core \& App Code} \\[0.06cm]
+        \scriptsize ARM Cortex-M7\\[0.04cm]
+        \scriptsize Non-intrusive Zero Overhead
+    };
+    \node [mod=green!60!black, text width=4.5cm, minimum height=2.1cm, right=0.55cm of core.north east, anchor=north west] (etm) {
+        \textbf{Trace Macrocell (ETMv4)} \\[0.06cm]
+        \scriptsize Branch \& Atom Filtering (N/E) \\[0.04cm]
+        \scriptsize Cycle Count (CCI) \& TS Packets
+    };
+    \node [mod=green!60!black, text width=4.4cm, minimum height=2.1cm, right=0.55cm of etm.north east, anchor=north west] (tpiu) {
+        \textbf{Port Interface (TPIU \& ETF)} \\[0.06cm]
+        \scriptsize Frame Formatting \& FSYNC \\[0.04cm]
+        \scriptsize 4-bit Synchronous Parallel Output
+    };
+
+    \begin{scope}[on background layer]
+        \node [tierbox=green!60!black, fit=(core) (etm) (tpiu)] (tier1) {};
+    \end{scope}
+
+    \node [tierbadge=green!60!black] at (tier1.north) {
+        Tier 1: Embedded Target Microcontroller (STM32H750VBT6 DUT)
+    };
+
+    \draw [bus] (core) -- node [above, buslabel] {Core Bus} (etm);
+    \draw [bus] (etm) -- node [above, buslabel] {32-bit ATB} (tpiu);
+
+    % =========================================================================
+    % TIER 2: Physical Measurement & Signal Acquisition
+    % Spacing from Tier 1 is exactly 1.8cm between tier boundaries
+    % =========================================================================
+    \node [mod=orange!80!black, text width=4.4cm, minimum height=2.1cm] (probes) at (0, -4.74) {
+        \textbf{High-Speed Flying Probes} \\[0.06cm]
+        \scriptsize Dedicated Port E Pins (PE2..PE6) \\[0.04cm]
+        \scriptsize Length $<$ 10 cm, Matched Z
+    };
+    \node [mod=orange!80!black, text width=4.5cm, minimum height=2.1cm, right=0.55cm of probes.north east, anchor=north west] (logic) {
+        \textbf{Digital Logic Analyzer} \\[0.06cm]
+        \scriptsize DSLogic U3Pro16 (16-ch, 1 GHz) \\[0.04cm]
+        \scriptsize 10$\times$ Asynchronous Oversampling \\[0.04cm]
+        \scriptsize 2 Gb DDR3 DRAM Buffer
+    };
+    \node [mod=orange!80!black, text width=4.4cm, minimum height=2.1cm, right=0.55cm of logic.north east, anchor=north west] (usb) {
+        \textbf{High-Speed Host Interface} \\[0.06cm]
+        \scriptsize USB 3.0 SuperSpeed (5 Gbps) \\[0.04cm]
+        \scriptsize Continuous Stream without Overflow
+    };
+
+    \begin{scope}[on background layer]
+        \node [tierbox=orange!80!black, fit=(probes) (logic) (usb)] (tier2) {};
+    \end{scope}
+
+    \node [tierbadge=orange!80!black] at (tier2.north) {
+        Tier 2: Physical Measurement \& Acquisition Instrumentation (DSLogic U3Pro16)
+    };
+
+    \draw [bus] (probes) -- node [above, buslabel] {Ch 0..4} (logic);
+    \draw [bus] (logic) -- node [above, buslabel] {USB FIFO} (usb);
+
+    % Inter-tier link 1 -> 2
+    \draw [databoot] (tpiu.south) -- ++(0,-0.7) -| ([xshift=-0.8cm]probes.north)
+        node [pos=0.28, signallabel] {5-Wire Physical Parallel Trace Bus (\texttt{TRACECLK + TRACED[0:3]})};
+
+    % =========================================================================
+    % TIER 3: Host PC -- CoreSight Trace Studio Wrapper
+    % Spacing from Tier 2 is exactly 1.8cm between tier boundaries
+    % =========================================================================
+    \node [mod=blue!80!black, text width=6.6cm, minimum height=2.4cm, anchor=north west] (py) at ($(probes.west) + (0, -3.69cm)$) {
+        \textbf{Host Processing Engine} \\[0.06cm]
+        \texttt{\scriptsize TraceStreamProcessor.py} \\[0.04cm]
+        \scriptsize $\bullet$ Edge Detect \& Digital Glitch Filtering \\[0.03cm]
+        \scriptsize $\bullet$ TPIU FSYNC/HSYNC Frame Alignment \\[0.03cm]
+        \scriptsize $\bullet$ 4-bit Nibble Reassembly \& ELF Dump
+    };
+
+    \node [mod=blue!80!black, text width=6.6cm, minimum height=2.4cm, anchor=north east] (opencsd) at ($(usb.east) + (0, -3.69cm)$) {
+        \textbf{Reference Decoder Engine} \\[0.06cm]
+        \scriptsize \textbf{OpenCSD Core Library} (Linaro Decoder) \\[0.04cm]
+        \scriptsize $\bullet$ Automated Snapshot Manifests Replay \\[0.03cm]
+        \scriptsize $\bullet$ Full Instruction Trajectory Recovery \\[0.03cm]
+        \scriptsize $\bullet$ Cycle (\lr{CCI}) \& Timestamp Decomp.
+    };
+
+    \draw [bus] (py) -- node [above, buslabel] {Snapshot INI} (opencsd);
+
+    % Studio IDE Feature Bar inside the wrapper
+    \node [rectangle, draw=purple!80!black, fill=purple!10, thick, rounded corners=5pt, text width=15.2cm, align=center, inner sep=4.5pt, anchor=north west] (ide_features) at ($(probes.west |- py.south) + (0, -0.65cm)$) {
+        \textbf{\footnotesize CoreSight Trace Studio: Unified IDE Dashboard \& Management Console} \\[0.05cm]
+        \scriptsize \textbf{Tab 1:} Driver \& Window Setup \,$\mid$\, \textbf{Tab 2:} Snapshot \& Replay \,$\mid$\, \textbf{Tab 3:} KPI Dashboard (\lr{WCET, CPI})
+    };
+
+    \draw [bus, draw=purple!80!black] (opencsd.south) -- node [right, buslabel] {Decoded Log} (ide_features.north -| opencsd.south);
+
+    \begin{scope}[on background layer]
+        \node [tierbox=purple!80!black, fill=purple!2, line width=1.4pt, rounded corners=7pt, fit=(py) (opencsd) (ide_features)] (tier3) {};
+    \end{scope}
+
+    \node [tierbadge=purple!80!black] at (tier3.north) {
+        Tier 3: CoreSight Trace Studio Wrapper (Host PC)
+    };
+
+    % Inter-tier link 2 -> 3: USB Stream enters Host Processing Engine
+    \draw [databoot] (usb.south) -- ++(0,-0.7) -| ([xshift=-1.0cm]py.north)
+        node [pos=0.28, signallabel] {High-Throughput Raw Digital Samples Stream (\texttt{CSV / Raw Wire})};
+
+    % Output arrow at bottom
+    \node [rectangle, draw=purple!80!black, fill=purple!8, thick, rounded corners=5pt, below=0.55cm of ide_features.south, text width=9.2cm, align=center] (outmatrix) {
+        \textbf{\small Structured Execution Trace Dataset ($\mathcal{M}_{\mathrm{trace}}$)}\\[0.05cm]
+        \scriptsize Cycle-Accurate Instruction Trajectory for Hybrid WCET Analysis
+    };
+    \draw [bus, draw=purple!80!black, line width=1.6pt] (ide_features.south) -- (outmatrix.north);
+
+\end{tikzpicture}
+\end{latin}
+\caption{معماری نهایی و جامع فیزیکی و نرم‌افزاری سامانه با تبیین دقیق جایگاه سخت‌افزار هدف، ابزار دقیق اندازه‌گیری و رپر خط‌لوله میزبان}
+\label{fig:final_full_architecture}
+\end{figure}
+
+\clearpage
+\section{جمع‌بندی فصل}
+در این فصل ریشه‌های فنی گذار از پردازنده‌های با دسترسی محدود به میکروکنترلر قدرتمند \lr{STM32H750} تبیین گردید. نیازمندی‌های دقیق سامانه استخراج شد و لایه‌های شش‌گانه تبدیل داده مورد تدقیق قرار گرفت. همچنین سازوکار مرزبندی معماری با سامانه آزمون مکمل بر پایه استقلال کارکردی و تبادل استاندارد ماتریس ردگیری پی‌ریزی شد و در بخش پایانی، معماری نهایی سامانه با تبیین دقیق جایگاه سخت‌افزار هدف، ابزاردقیق اندازه‌گیری و خط‌لوله پردازش میزبان مستندسازی گردید. در فصول بعدی، به پیاده‌سازی سخت‌افزاری و ثبت الکتریکی سیگنال‌ها پرداخته خواهد شد.

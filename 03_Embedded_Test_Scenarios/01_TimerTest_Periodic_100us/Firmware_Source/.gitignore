@@ -1,0 +1,52 @@
+# ==========================================
+# STM32CubeIDE / GCC Build Artifacts
+# ==========================================
+# Ignore compiler build folders
+/Debug/
+/Release/
+
+# Intermediate compiler object, dependency, and stack usage files
+*.o
+*.d
+*.su
+*.o.d
+
+# Compiled target binaries and map files
+*.elf
+*.hex
+*.bin
+*.map
+*.axf
+*.srec
+
+# ==========================================
+# IDE & Debugger Local Settings
+# ==========================================
+# Local IDE configuration (e.g., local paths, toolchain specs)
+.settings/
+
+# ST-Link / Debugger launcher configurations (contain local paths)
+*.launch
+
+# Eclipse metadata and indexer files
+.metadata/
+.recommenders/
+
+# ==========================================
+# Temporary & OS Files
+# ==========================================
+*.log
+*.bak
+*~
+.DS_Store
+Thumbs.db
+
+# ==========================================
+# Pico SDK helper project (pico_echo_c/)
+# ==========================================
+pico_echo_c/build/
+*.uf2
+*.dis
+# Belongs to whichever pico-sdk version is installed locally, not to the repo.
+# Recreate with: copy "%PICO_SDK_PATH%\external\pico_sdk_import.cmake" .
+pico_echo_c/pico_sdk_import.cmake

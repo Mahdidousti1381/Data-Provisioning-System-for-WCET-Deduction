@@ -1,0 +1,90 @@
+{
+  "name": "coresight-trace-studio",
+  "displayName": "CoreSight Trace Studio",
+  "description": "Complete ARM CoreSight & ETMv4 Parallel Trace Toolkit: Code Instrumentation, OpenCSD Snapshot Generation, and Trace Decoding",
+  "version": "0.4.3",
+  "publisher": "mahdidousti",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Debuggers",
+    "Other"
+  ],
+  "keywords": [
+    "ARM",
+    "CoreSight",
+    "ETM",
+    "ETMv4",
+    "Trace",
+    "STM32",
+    "OpenCSD",
+    "WCET"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "coresight.openStudio",
+        "title": "Open CoreSight Trace Studio Dashboard",
+        "category": "CoreSight Trace"
+      },
+      {
+        "command": "coresight.addDriverFiles",
+        "title": "Add ETMv4 Driver Files (ETMv4.c & ETMv4.h) to Project",
+        "category": "CoreSight Trace"
+      },
+      {
+        "command": "coresight.injectConfig",
+        "title": "Inject Parallel_Trace_configure() into Active File",
+        "category": "CoreSight Trace"
+      },
+      {
+        "command": "coresight.wrapSelection",
+        "title": "Wrap Selection with Trace Window (StartPoint / StopPoint)",
+        "category": "CoreSight Trace"
+      }
+    ],
+    "menus": {
+      "editor/context": [
+        {
+          "command": "coresight.wrapSelection",
+          "when": "editorHasSelection",
+          "group": "7_modification"
+        },
+        {
+          "command": "coresight.injectConfig",
+          "group": "7_modification"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "coresight.openStudio"
+        },
+        {
+          "command": "coresight.addDriverFiles"
+        },
+        {
+          "command": "coresight.injectConfig"
+        },
+        {
+          "command": "coresight.wrapSelection"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "@types/vscode": "^1.85.0",
+    "typescript": "^5.3.3"
+  }
+}
