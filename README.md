@@ -55,7 +55,7 @@ CoreSight_Trace_Framework_Deliverables/
 │   ├── templates/                                      # ETMv4 firmware driver templates
 │   ├── out/                                            # Compiled JavaScript extension bundle
 │   ├── icon.png                                        # Official extension logo icon (512x512)
-│   ├── coresight-trace-studio-0.4.5.vsix               # VS Code Extension VSIX installer (Latest v0.4.5)
+│   ├── coresight-trace-studio-0.4.6.vsix               # VS Code Extension VSIX installer (Latest v0.4.6)
 │   ├── package.json, tsconfig.json
 │   └── README.md
 │
@@ -95,7 +95,7 @@ CoreSight_Trace_Framework_Deliverables/
 *   Includes the development history of earlier decoders (`TempDecoder_V0.py` to `V0.2.py`).
 
 ### `05_VSCode_Coresight_Trace_Studio_Extension`
-*   Full source code and `.vsix` installer for **CoreSight Trace Studio (v0.4.5)**, a custom VS Code extension providing:
+*   Full source code and `.vsix` installer for **CoreSight Trace Studio (v0.4.6)**, a custom VS Code extension providing:
     *   Official custom logo branding and high-DPI modern dark UI theme.
     *   Pinout visualization and DSLogic wiring guides.
     *   Interactive visual bitfield editor for ETMv4 registers (`TRCCONFIGR`, `TRCSYNCPR`, `TRCCCCTLR`).

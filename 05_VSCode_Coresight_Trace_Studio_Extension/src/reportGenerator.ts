@@ -4,6 +4,7 @@ import * as readline from 'readline';
 
 export interface ExceptionRecord {
     index: number;
+    excepNum: string;
     type: string;
     preTs: bigint | null;
     entryTs: bigint | null;
@@ -12,6 +13,19 @@ export interface ExceptionRecord {
     threadTimeBeforeUs: number | null;
     cycles: number;
     instructions: number;
+}
+
+export interface IsrTypeBreakdown {
+    typeName: string;
+    excepNum: string;
+    count: number;
+    totalCycles: number;
+    totalInstructions: number;
+    totalDurationUs: number;
+    avgCycles: number;
+    avgInstructions: number;
+    avgDurationUs: number;
+    cpuPercentage: number;
 }
 
 export interface TraceReportData {
@@ -34,9 +48,31 @@ export interface TraceReportData {
     avgIsrInstructions: number;
     isrCyclePercentage: number;
     interArrivalPeriodUs: number;
+    isrBreakdown: IsrTypeBreakdown[];
     sampleExceptions: ExceptionRecord[];
     allExceptions: ExceptionRecord[];
     hotspots: { address: string; count: number; percentage: number }[];
+}
+
+function getExceptionName(excepNumHex: string): string {
+    const num = parseInt(excepNumHex, 16);
+    switch (num) {
+        case 1: return 'Reset';
+        case 2: return 'NMI';
+        case 3: return 'HardFault';
+        case 4: return 'MemManage';
+        case 5: return 'BusFault';
+        case 6: return 'UsageFault';
+        case 11: return 'SVCall';
+        case 12: return 'DebugMonitor';
+        case 14: return 'PendSV';
+        case 15: return 'SysTick';
+        default:
+            if (num >= 16) {
+                return `IRQ_${num - 16}`;
+            }
+            return `Exception`;
+    }
 }
 
 export class ReportGenerator {
@@ -66,13 +102,18 @@ export class ReportGenerator {
         let inException = false;
         let currentEx: {
             index: number;
+            excepNum: string;
             type: string;
             preTs: bigint | null;
             entryTs: bigint | null;
             exitTs: bigint | null;
+            startCc: number | null;
+            endCc: number | null;
             cycles: number;
             instructions: number;
             exitPending: boolean;
+            isrDurationUs: number | null;
+            threadTimeBeforeUs: number | null;
         } | null = null;
 
         const hotspotsMap: { [addr: string]: number } = {};
@@ -102,19 +143,27 @@ export class ReportGenerator {
                 }
                 if (currentEx && currentEx.exitPending) {
                     currentEx.exitTs = currentTs;
-                    const duration = currentEx.entryTs !== null ? Number(currentEx.exitTs - currentEx.entryTs) : null;
-                    const threadBefore = (currentEx.preTs !== null && currentEx.entryTs !== null)
+                    if (currentEx.endCc !== null && currentEx.startCc !== null && currentEx.endCc >= currentEx.startCc) {
+                        currentEx.cycles = currentEx.endCc - currentEx.startCc;
+                    } else if (currentEx.exitTs !== null && currentEx.entryTs !== null) {
+                        currentEx.cycles = Number(currentEx.exitTs - currentEx.entryTs);
+                    }
+                    currentEx.isrDurationUs = (currentEx.exitTs !== null && currentEx.entryTs !== null)
+                        ? Number(currentEx.exitTs - currentEx.entryTs)
+                        : currentEx.cycles;
+                    currentEx.threadTimeBeforeUs = (currentEx.preTs !== null && currentEx.entryTs !== null)
                         ? Number(currentEx.entryTs - currentEx.preTs)
                         : null;
 
                     allExceptions.push({
                         index: currentEx.index,
+                        excepNum: currentEx.excepNum,
                         type: currentEx.type,
                         preTs: currentEx.preTs,
                         entryTs: currentEx.entryTs,
                         exitTs: currentEx.exitTs,
-                        isrDurationUs: duration,
-                        threadTimeBeforeUs: threadBefore,
+                        isrDurationUs: currentEx.isrDurationUs,
+                        threadTimeBeforeUs: currentEx.threadTimeBeforeUs,
                         cycles: currentEx.cycles,
                         instructions: currentEx.instructions
                     });
@@ -122,6 +171,24 @@ export class ReportGenerator {
                     lastThreadTs = currentTs;
                     currentEx = null;
                     inException = false;
+                }
+            }
+
+            if (line.includes('OCSD_GEN_TRC_ELEM_TIMESTAMP(') && inException && currentEx) {
+                const ccM = line.match(/\[CC=(\d+)\]/);
+                if (ccM && currentEx.startCc === null) {
+                    currentEx.startCc = parseInt(ccM[1], 10);
+                }
+            }
+
+            if (line.includes('OCSD_GEN_TRC_ELEM_CYCLE_COUNT(')) {
+                const ccM = line.match(/\[CC=(\d+)\]/);
+                if (ccM) {
+                    const cc = parseInt(ccM[1], 10);
+                    totalCycles += cc;
+                    if (inException && currentEx) {
+                        currentEx.endCc = cc;
+                    }
                 }
             }
 
@@ -138,38 +205,37 @@ export class ReportGenerator {
                 }
             }
 
-            // Count cycles strictly from canonical OCSD_GEN_TRC_ELEM_CYCLE_COUNT elements
-            // (avoiding duplicate [CC=...] metadata attributes on OCSD_GEN_TRC_ELEM_TIMESTAMP packets)
-            if (line.includes('OCSD_GEN_TRC_ELEM_CYCLE_COUNT(')) {
-                const ccM = line.match(/\[CC=(\d+)\]/);
-                if (ccM) {
-                    const cc = parseInt(ccM[1], 10);
-                    totalCycles += cc;
-                    if (inException && currentEx) currentEx.cycles += cc;
-                }
-            }
-
             if (line.includes('I_ATOM_') || line.includes('ATOM_')) {
                 totalAtoms++;
             }
 
             if (line.includes('OCSD_GEN_TRC_ELEM_EXCEPTION(')) {
                 inException = true;
-                const exType = line.includes('excep num (0x0f)') ? 'SysTick' : 'IRQ';
+                const exMatch = line.match(/excep num \((0x[0-9a-fA-F]+)\)/);
+                const exNum = exMatch ? exMatch[1].toLowerCase() : '0x00';
+                const exTypeName = getExceptionName(exNum);
+
                 if (prevExEntryTs !== null && currentTs !== null) {
                     interArrivalDiffs.push(Number(currentTs - prevExEntryTs));
                 }
                 prevExEntryTs = currentTs;
 
+                const hexFormatted = '0x' + parseInt(exNum, 16).toString(16).toUpperCase().padStart(2, '0');
+
                 currentEx = {
                     index: allExceptions.length + 1,
-                    type: exType,
+                    excepNum: hexFormatted,
+                    type: `${exTypeName} (${hexFormatted})`,
                     preTs: lastThreadTs,
                     entryTs: null,
                     exitTs: null,
+                    startCc: null,
+                    endCc: null,
                     cycles: 0,
                     instructions: 0,
-                    exitPending: false
+                    exitPending: false,
+                    isrDurationUs: null,
+                    threadTimeBeforeUs: null
                 };
             } else if (line.includes('OCSD_GEN_TRC_ELEM_EXCEPTION_RET()')) {
                 if (currentEx) {
@@ -191,7 +257,49 @@ export class ReportGenerator {
 
         const avgIsrCycles = allExceptions.length > 0 ? parseFloat((totalIsrCycles / allExceptions.length).toFixed(1)) : 0;
         const avgIsrInstructions = allExceptions.length > 0 ? parseFloat((totalIsrInstructions / allExceptions.length).toFixed(1)) : 0;
-        const isrCyclePercentage = totalCycles > 0 ? parseFloat(((totalIsrCycles / totalCycles) * 100).toFixed(1)) : 0;
+        const isrCyclePercentage = totalCycles > 0 ? parseFloat(((totalIsrCycles / totalCycles) * 100).toFixed(2)) : 0;
+
+        const isrTypeMap: { [key: string]: {
+            typeName: string;
+            excepNum: string;
+            count: number;
+            totalCycles: number;
+            totalInstructions: number;
+            totalDurationUs: number;
+        } } = {};
+
+        allExceptions.forEach(e => {
+            const key = e.type;
+            if (!isrTypeMap[key]) {
+                isrTypeMap[key] = {
+                    typeName: e.type,
+                    excepNum: e.excepNum,
+                    count: 0,
+                    totalCycles: 0,
+                    totalInstructions: 0,
+                    totalDurationUs: 0
+                };
+            }
+            isrTypeMap[key].count++;
+            isrTypeMap[key].totalCycles += e.cycles;
+            isrTypeMap[key].totalInstructions += e.instructions;
+            isrTypeMap[key].totalDurationUs += (e.isrDurationUs !== null ? e.isrDurationUs : e.cycles);
+        });
+
+        const isrBreakdown: IsrTypeBreakdown[] = Object.values(isrTypeMap)
+            .map(g => ({
+                typeName: g.typeName,
+                excepNum: g.excepNum,
+                count: g.count,
+                totalCycles: g.totalCycles,
+                totalInstructions: g.totalInstructions,
+                totalDurationUs: g.totalDurationUs,
+                avgCycles: g.count > 0 ? parseFloat((g.totalCycles / g.count).toFixed(1)) : 0,
+                avgInstructions: g.count > 0 ? parseFloat((g.totalInstructions / g.count).toFixed(1)) : 0,
+                avgDurationUs: g.count > 0 ? parseFloat((g.totalDurationUs / g.count).toFixed(1)) : 0,
+                cpuPercentage: totalCycles > 0 ? parseFloat(((g.totalCycles / totalCycles) * 100).toFixed(2)) : 0
+            }))
+            .sort((a, b) => b.totalCycles - a.totalCycles);
 
         let sumArrival = 0;
         interArrivalDiffs.forEach(d => sumArrival += d);
@@ -238,6 +346,7 @@ export class ReportGenerator {
             avgIsrInstructions,
             isrCyclePercentage,
             interArrivalPeriodUs,
+            isrBreakdown,
             sampleExceptions,
             allExceptions,
             hotspots: sortedHotspots
@@ -286,12 +395,20 @@ export class ReportGenerator {
         md += `## 2. Exception & IRQ Service Routine Analysis\n\n`;
         md += `| Metric | Value | Description |\n`;
         md += `| :--- | :--- | :--- |\n`;
-        md += `| **Total Exception Occurrences** | **${d.exceptionsCount}** | SysTick timer interrupt invocations |\n`;
-        md += `| **IRQ Inter-Arrival Interval** | **${d.interArrivalPeriodUs.toLocaleString()} µs (~${(d.interArrivalPeriodUs / 1000).toFixed(3)} ms)** | SysTick periodic rate (1 kHz) |\n`;
-        md += `| **Average Time in ISR** | **${d.avgIsrCycles} cycles (~34 µs)** | Elapsed time handling each exception |\n`;
-        md += `| **Instructions Executed per ISR** | **${d.avgIsrInstructions} instrs** | Compact SysTick handler + HAL_IncTick |\n`;
-        md += `| **Total CPU Time in ISRs** | **${d.totalIsrCycles.toLocaleString()} cycles (${d.isrCyclePercentage}%)** | Total interrupt overhead in trace window |\n`;
-        md += `| **Main Thread Execution** | **${(d.totalCycles - d.totalIsrCycles).toLocaleString()} cycles (${(100 - d.isrCyclePercentage).toFixed(1)}%)** | Application main loop execution |\n\n`;
+        md += `| **Total Exception Occurrences** | **${d.exceptionsCount}** | Interrupt / exception events |\n`;
+        md += `| **IRQ Inter-Arrival Interval** | **${d.interArrivalPeriodUs.toLocaleString()} µs (~${(d.interArrivalPeriodUs / 1000).toFixed(3)} ms)** | Periodic rate |\n`;
+        md += `| **Total CPU Time in All ISRs** | **${d.totalIsrCycles.toLocaleString()} cycles (${d.isrCyclePercentage}%)** | Cumulative interrupt handling overhead |\n`;
+        md += `| **Main Thread Execution** | **${(d.totalCycles - d.totalIsrCycles).toLocaleString()} cycles (${(100 - d.isrCyclePercentage).toFixed(2)}%)** | Application main loop execution |\n`;
+        md += `| **Average Cost per ISR** | **${d.avgIsrCycles} cycles (~${d.avgIsrCycles} µs @ 1 MHz)** | Mean latency per invocation |\n`;
+        md += `| **Instructions Executed per ISR** | **${d.avgIsrInstructions} instrs** | Real instructions inside handler |\n\n`;
+
+        md += `### CPU Execution Split by ISR Type\n\n`;
+        md += `| Exception / ISR Type | Vector (Hex) | Invocations | Total Cycles | Total Time (µs) | CPU % Share | Mean Cycles | Mean Instrs |\n`;
+        md += `| :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: |\n`;
+        d.isrBreakdown.forEach(b => {
+            md += `| **${b.typeName}** | \`${b.excepNum.toUpperCase()}\` | ${b.count.toLocaleString()} | **${b.totalCycles.toLocaleString()}** | ${b.totalDurationUs.toLocaleString()} µs | **${b.cpuPercentage}%** | ${b.avgCycles} | ${b.avgInstructions} |\n`;
+        });
+        md += `\n`;
 
         md += `### Timestamps Before and After IRQ Service Routines\n\n`;
         md += `| # | Type | Pre-IRQ TS (Thread) | Entry TS (ISR Start) | Exit TS (ISR End) | ISR Elapsed (&Delta;TS) | Cycles | Instrs |\n`;
@@ -453,9 +570,9 @@ export class ReportGenerator {
                 <div class="metric-sub">Period: <b>${(d.interArrivalPeriodUs / 1000).toFixed(3)} ms</b> (~${d.interArrivalPeriodUs} µs)</div>
             </div>
             <div class="card" style="margin-bottom: 0;">
-                <div class="metric-title">Elapsed Time in ISR</div>
-                <div class="metric-val" style="color: var(--orange);">${d.avgIsrCycles} cycles</div>
-                <div class="metric-sub">Mean ${d.avgIsrInstructions} instructions / invocation</div>
+                <div class="metric-title">Total Time in All ISRs</div>
+                <div class="metric-val" style="color: var(--orange);">${d.totalIsrCycles.toLocaleString()} cycles</div>
+                <div class="metric-sub">${d.isrCyclePercentage}% of CPU &middot; Mean ${d.avgIsrCycles} cycles (${d.avgIsrInstructions} instrs) / invocation</div>
             </div>
         </div>
 
@@ -503,12 +620,42 @@ export class ReportGenerator {
             <h2 style="font-size: 15px; margin-bottom: 12px; color: var(--heading);">2. Interrupt &amp; Exception Handling Performance</h2>
             <p style="font-size: 13px; color: var(--muted); margin-bottom: 8px;">
                 Execution split: <b>${d.isrCyclePercentage}% in ISRs</b> (${d.totalIsrCycles.toLocaleString()} cycles) vs. 
-                <b>${(100 - d.isrCyclePercentage).toFixed(1)}% in Main Thread</b> (${(d.totalCycles - d.totalIsrCycles).toLocaleString()} cycles).
+                <b>${(100 - d.isrCyclePercentage).toFixed(2)}% in Main Thread</b> (${(d.totalCycles - d.totalIsrCycles).toLocaleString()} cycles).
             </p>
             <div class="progress-bar">
                 <div class="bar-isr" style="width: ${d.isrCyclePercentage}%;" title="ISR: ${d.isrCyclePercentage}%"></div>
-                <div class="bar-main" style="width: ${100 - d.isrCyclePercentage}%;" title="Main Thread: ${(100 - d.isrCyclePercentage).toFixed(1)}%"></div>
+                <div class="bar-main" style="width: ${100 - d.isrCyclePercentage}%;" title="Main Thread: ${(100 - d.isrCyclePercentage).toFixed(2)}%"></div>
             </div>
+
+            <h3 style="font-size: 13px; margin: 18px 0 10px 0; color: var(--heading);">CPU Execution Split by ISR Type:</h3>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Exception / ISR Type</th>
+                        <th>Vector (Hex)</th>
+                        <th>Invocations</th>
+                        <th>Total Cycles</th>
+                        <th>Total Time (&Delta;TS)</th>
+                        <th>CPU % Share</th>
+                        <th>Mean Cycles</th>
+                        <th>Mean Instructions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${d.isrBreakdown.map(b => `
+                        <tr>
+                            <td><span style="color: var(--purple); font-weight: 600;">${b.typeName}</span></td>
+                            <td><code>${b.excepNum.toUpperCase()}</code></td>
+                            <td>${b.count.toLocaleString()}</td>
+                            <td><b>${b.totalCycles.toLocaleString()} cycles</b></td>
+                            <td>${b.totalDurationUs.toLocaleString()} µs</td>
+                            <td><span style="color: var(--orange); font-weight: 600;">${b.cpuPercentage}%</span></td>
+                            <td>${b.avgCycles} cycles</td>
+                            <td>${b.avgInstructions} instrs</td>
+                        </tr>
+                    `).join('')}
+                </tbody>
+            </table>
 
             <h3 style="font-size: 13px; margin: 18px 0 10px 0; color: var(--heading);">Timestamps Before and After IRQ Service Routines:</h3>
             <table>

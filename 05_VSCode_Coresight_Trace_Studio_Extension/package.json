@@ -2,7 +2,7 @@
   "name": "coresight-trace-studio",
   "displayName": "CoreSight Trace Studio",
   "description": "Complete ARM CoreSight & ETMv4 Parallel Trace Toolkit: Code Instrumentation, OpenCSD Snapshot Generation, and Trace Decoding",
-  "version": "0.4.5",
+  "version": "0.4.6",
   "icon": "icon.png",
   "publisher": "mahdidousti",
   "repository": {

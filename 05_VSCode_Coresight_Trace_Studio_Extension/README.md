@@ -26,7 +26,8 @@ It bridges firmware configuration, hardware pinout mapping, logic analyzer captu
 │   └── ETMv4.h
 ├── out/                                  # Compiled JavaScript bundle
 ├── icon.png                              # Extension logo icon (512x512)
-├── coresight-trace-studio-0.4.5.vsix     # Packaged VSIX extension installer (Latest v0.4.5)
+├── coresight-trace-studio-0.4.6.vsix     # Packaged VSIX extension installer (Latest v0.4.6)
+├── coresight-trace-studio-0.4.5.vsix
 ├── coresight-trace-studio-0.4.4.vsix
 ├── coresight-trace-studio-0.4.3.vsix
 ├── coresight-trace-studio-0.4.2.vsix
@@ -73,7 +74,7 @@ It bridges firmware configuration, hardware pinout mapping, logic analyzer captu
 ### Option A: Install from VSIX via Command Line
 Open a terminal in this directory and execute:
 ```bash
-code --install-extension coresight-trace-studio-0.4.5.vsix --force
+code --install-extension coresight-trace-studio-0.4.6.vsix --force
 ```
 
 ### Option B: Install from VSIX via VS Code UI
@@ -81,7 +82,7 @@ code --install-extension coresight-trace-studio-0.4.5.vsix --force
 2.  Navigate to the **Extensions** view (`Ctrl + Shift + X`).
 3.  Click the **`...`** (Views and More Actions) menu in the top-right corner of the Extensions pane.
 4.  Select **Install from VSIX...**.
-5.  Choose `coresight-trace-studio-0.4.5.vsix`.
+5.  Choose `coresight-trace-studio-0.4.6.vsix`.
 
 ---
 
