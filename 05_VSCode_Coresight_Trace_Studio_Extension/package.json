@@ -2,8 +2,13 @@
   "name": "coresight-trace-studio",
   "displayName": "CoreSight Trace Studio",
   "description": "Complete ARM CoreSight & ETMv4 Parallel Trace Toolkit: Code Instrumentation, OpenCSD Snapshot Generation, and Trace Decoding",
-  "version": "0.4.3",
+  "version": "0.4.5",
+  "icon": "icon.png",
   "publisher": "mahdidousti",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Mahdidousti1381/BP_Test0_H7"
+  },
   "engines": {
     "vscode": "^1.85.0"
   },

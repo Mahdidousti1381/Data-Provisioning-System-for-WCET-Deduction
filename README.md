@@ -50,11 +50,12 @@ CoreSight_Trace_Framework_Deliverables/
 │   ├── Development_History/                            # Evolution prototypes (V0, V0.1, V0.2, gaps)
 │   └── README.md
 │
-├── 05_VSCode_Trace_Studio_Extension/
+├── 05_VSCode_Coresight_Trace_Studio_Extension/
 │   ├── src/                                            # TypeScript source code (Webview, IPC, ReportEngine)
 │   ├── templates/                                      # ETMv4 firmware driver templates
 │   ├── out/                                            # Compiled JavaScript extension bundle
-│   ├── coresight-trace-studio-0.4.3.vsix               # VS Code Extension VSIX installer (Latest v0.4.3)
+│   ├── icon.png                                        # Official extension logo icon (512x512)
+│   ├── coresight-trace-studio-0.4.5.vsix               # VS Code Extension VSIX installer (Latest v0.4.5)
 │   ├── package.json, tsconfig.json
 │   └── README.md
 │
@@ -93,8 +94,9 @@ CoreSight_Trace_Framework_Deliverables/
 *   Features **`TraceStreamProcessor.py`**, which automatically reconstructs 4-bit parallel logic captures into TPIU frames, extracts memory sections from the firmware ELF, builds OpenCSD snapshots, and runs `trc_pkt_lister`.
 *   Includes the development history of earlier decoders (`TempDecoder_V0.py` to `V0.2.py`).
 
-### `05_VSCode_Trace_Studio_Extension`
-*   Full source code and `.vsix` installer for **CoreSight Trace Studio (v0.4.2)**, a custom VS Code extension providing:
+### `05_VSCode_Coresight_Trace_Studio_Extension`
+*   Full source code and `.vsix` installer for **CoreSight Trace Studio (v0.4.5)**, a custom VS Code extension providing:
+    *   Official custom logo branding and high-DPI modern dark UI theme.
     *   Pinout visualization and DSLogic wiring guides.
     *   Interactive visual bitfield editor for ETMv4 registers (`TRCCONFIGR`, `TRCSYNCPR`, `TRCCCCTLR`).
     *   **Direct Firmware Synchronization**: Injects and updates configuration parameters directly into `ETMv4.c` in the active project workspace with silicon constraint enforcement (e.g. read-only `TRCSYNCPR` lock on Cortex-M7).

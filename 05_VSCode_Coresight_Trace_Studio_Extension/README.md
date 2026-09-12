@@ -1,5 +1,9 @@
 # CoreSight Trace Studio — VS Code IDE Extension
 
+<p align="center">
+  <img src="icon.png" width="160" alt="CoreSight Trace Studio Logo" style="border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.3);" />
+</p>
+
 ## 1. Overview
 **CoreSight Trace Studio** is a professional Visual Studio Code extension engineered to serve as an integrated GUI and workflow cockpit for embedded developers working with ARM CoreSight hardware-assisted trace (ETMv4).
 
@@ -9,7 +13,7 @@ It bridges firmware configuration, hardware pinout mapping, logic analyzer captu
 
 ## 2. Directory Structure
 ```
-05_VSCode_Trace_Studio_Extension/
+05_VSCode_Coresight_Trace_Studio_Extension/
 ├── src/                                  # TypeScript extension source code
 │   ├── extension.ts                      # Activation & command registry
 │   ├── codeInjector.ts                   # ETMv4.c automated driver synchronization
@@ -21,7 +25,10 @@ It bridges firmware configuration, hardware pinout mapping, logic analyzer captu
 │   ├── ETMv4.c
 │   └── ETMv4.h
 ├── out/                                  # Compiled JavaScript bundle
-├── coresight-trace-studio-0.4.3.vsix     # Packaged VSIX extension installer (Latest v0.4.3)
+├── icon.png                              # Extension logo icon (512x512)
+├── coresight-trace-studio-0.4.5.vsix     # Packaged VSIX extension installer (Latest v0.4.5)
+├── coresight-trace-studio-0.4.4.vsix
+├── coresight-trace-studio-0.4.3.vsix
 ├── coresight-trace-studio-0.4.2.vsix
 ├── coresight-trace-studio-0.3.0.vsix
 ├── coresight-trace-studio-0.2.0.vsix
@@ -66,7 +73,7 @@ It bridges firmware configuration, hardware pinout mapping, logic analyzer captu
 ### Option A: Install from VSIX via Command Line
 Open a terminal in this directory and execute:
 ```bash
-code --install-extension coresight-trace-studio-0.4.2.vsix --force
+code --install-extension coresight-trace-studio-0.4.5.vsix --force
 ```
 
 ### Option B: Install from VSIX via VS Code UI
@@ -74,7 +81,7 @@ code --install-extension coresight-trace-studio-0.4.2.vsix --force
 2.  Navigate to the **Extensions** view (`Ctrl + Shift + X`).
 3.  Click the **`...`** (Views and More Actions) menu in the top-right corner of the Extensions pane.
 4.  Select **Install from VSIX...**.
-5.  Choose `coresight-trace-studio-0.4.2.vsix`.
+5.  Choose `coresight-trace-studio-0.4.5.vsix`.
 
 ---
 

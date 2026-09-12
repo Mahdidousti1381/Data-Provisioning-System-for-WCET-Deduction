@@ -378,11 +378,13 @@ class CoreSightPanel {
         const htmlPath = path.join(mediaPath, 'studio.html');
         const cssUri = webview.asWebviewUri(vscode.Uri.file(path.join(mediaPath, 'studio.css')));
         const jsUri = webview.asWebviewUri(vscode.Uri.file(path.join(mediaPath, 'studio.js')));
+        const logoUri = webview.asWebviewUri(vscode.Uri.file(path.join(mediaPath, 'logo.png')));
         let html = '';
         if (fs.existsSync(htmlPath)) {
             html = fs.readFileSync(htmlPath, 'utf8');
             html = html.replace('{{styleUri}}', cssUri.toString());
             html = html.replace('{{scriptUri}}', jsUri.toString());
+            html = html.replace('{{logoUri}}', logoUri.toString());
         }
         else {
             html = `<!DOCTYPE html><html><body><h3>Studio HTML loading...</h3></body></html>`;
