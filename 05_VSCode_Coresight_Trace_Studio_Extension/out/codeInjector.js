@@ -33,10 +33,27 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.CodeInjector = void 0;
+exports.CodeInjector = exports.TRACE_WINDOW_MARKERS = void 0;
 const vscode = __importStar(require("vscode"));
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
+/** The call pair injected for each window mode. */
+exports.TRACE_WINDOW_MARKERS = {
+    dwt_gated: {
+        open: 'StartPoint();',
+        close: 'StopPoint();',
+        openNote: '/* Trace Window Start */',
+        closeNote: '/* Trace Window Stop */',
+        label: 'StartPoint() / StopPoint()'
+    },
+    trace_all: {
+        open: 'Enable_ETM();',
+        close: 'Disable_ETM();',
+        openNote: '/* Trace ON  - unconditional ViewInst */',
+        closeNote: '/* Trace OFF - unconditional ViewInst */',
+        label: 'Enable_ETM() / Disable_ETM()'
+    }
+};
 class CodeInjector {
     /**
      * Ensures #include "ETMv4.h" is present in the specified file.
@@ -85,7 +102,10 @@ class CodeInjector {
                 return { success: false, message: `File not found: ${filePath}` };
             }
             // Ensure include is there first
-            await this.injectIncludes(filePath);
+            // The include is added AFTER the wrap, deliberately. injectIncludes()
+            // inserts a line near the top of the file, so doing it first shifts
+            // every line below it and the caller's line numbers - which they read
+            // off the unmodified file - would land one statement early.
             const lines = fs.readFileSync(filePath, 'utf8').split(/\r?\n/);
             // Check if already called
             if (lines.some(l => l.includes('Parallel_Trace_configure();'))) {
@@ -145,32 +165,68 @@ class CodeInjector {
         }
     }
     /**
-     * Wraps the current editor selection with StartPoint(); and StopPoint();
+     * Where to insert #include "ETMv4.h" in an open document, or undefined if
+     * it is already there. Mirrors injectIncludes(), but works on the editor's
+     * buffer instead of the file on disk.
      */
-    static async wrapSelectionWithStartStop(editor) {
+    static findIncludeInsertPosition(document) {
+        const text = document.getText();
+        if (text.includes('#include "ETMv4.h"') || text.includes('#include <ETMv4.h>')) {
+            return undefined;
+        }
+        const marker = '/* USER CODE BEGIN Includes */';
+        const markerIdx = text.indexOf(marker);
+        if (markerIdx !== -1) {
+            const pos = document.positionAt(markerIdx + marker.length);
+            return { position: pos, text: '\n#include "ETMv4.h"' };
+        }
+        const includes = [...text.matchAll(/#include\s+["<][^">]+[">]/g)];
+        const last = includes.length > 0 ? includes[includes.length - 1] : undefined;
+        if (last && last.index !== undefined) {
+            const pos = document.positionAt(last.index + last[0].length);
+            return { position: pos, text: '\n#include "ETMv4.h"' };
+        }
+        return { position: new vscode.Position(0, 0), text: '#include "ETMv4.h"\n' };
+    }
+    /**
+     * Wraps the current editor selection with the window calls for `mode`.
+     */
+    static async wrapSelectionWithStartStop(editor, mode = 'dwt_gated') {
         try {
             const document = editor.document;
             const selection = editor.selection;
             if (selection.isEmpty) {
                 return { success: false, message: 'Please select a code block to wrap with trace Start/Stop points.' };
             }
-            // Ensure includes
-            await this.injectIncludes(document.uri.fsPath);
             const startLine = selection.start.line;
             const endLine = selection.end.line;
             const firstLineText = document.lineAt(startLine).text;
             const indentMatch = firstLineText.match(/^(\s*)/);
             const indent = indentMatch ? indentMatch[1] : '  ';
-            const startPointCode = `${indent}StartPoint(); /* Trace Window Start */\n`;
-            const stopPointCode = `\n${indent}StopPoint();  /* Trace Window Stop */`;
+            const marker = exports.TRACE_WINDOW_MARKERS[mode];
+            const startPointCode = `${indent}${marker.open} ${marker.openNote}\n`;
+            const stopPointCode = `\n${indent}${marker.close} ${marker.closeNote}`;
             const startPos = new vscode.Position(startLine, 0);
             const endPos = document.lineAt(endLine).range.end;
+            // The include goes in through the same edit rather than through a
+            // separate fs write. Writing the file underneath an open editor
+            // races with the editor's own buffer - if the document is dirty the
+            // write is silently lost, and if it is clean the reload shifts every
+            // position this edit is about to use. All inserts in one edit() are
+            // applied against the original positions, so they stay consistent.
+            const includeInsert = this.findIncludeInsertPosition(document);
             const success = await editor.edit(editBuilder => {
+                if (includeInsert) {
+                    editBuilder.insert(includeInsert.position, includeInsert.text);
+                }
                 editBuilder.insert(startPos, startPointCode);
                 editBuilder.insert(endPos, stopPointCode);
             });
             if (success) {
-                return { success: true, message: `Wrapped lines ${startLine + 1} to ${endLine + 1} with StartPoint() and StopPoint()` };
+                return {
+                    success: true,
+                    message: `Wrapped lines ${startLine + 1} to ${endLine + 1} with ${marker.label}`
+                };
             }
             else {
                 return { success: false, message: 'VS Code editor edit failed.' };
@@ -183,12 +239,15 @@ class CodeInjector {
     /**
      * Wraps a line range specified by line numbers in a file.
      */
-    static async wrapLinesWithStartStop(filePath, fromLine, toLine) {
+    static async wrapLinesWithStartStop(filePath, fromLine, toLine, mode = 'dwt_gated') {
         try {
             if (!fs.existsSync(filePath)) {
                 return { success: false, message: `File not found: ${filePath}` };
             }
-            await this.injectIncludes(filePath);
+            // The include is added AFTER the wrap, deliberately. injectIncludes()
+            // inserts a line near the top of the file, so doing it first shifts
+            // every line below it and the caller's line numbers - which they read
+            // off the unmodified file - would land one statement early.
             const lines = fs.readFileSync(filePath, 'utf8').split(/\r?\n/);
             const startIdx = Math.max(0, fromLine - 1);
             const endIdx = Math.min(lines.length - 1, toLine - 1);
@@ -197,14 +256,15 @@ class CodeInjector {
             }
             const indentMatch = lines[startIdx].match(/^(\s*)/);
             const indent = indentMatch ? indentMatch[1] : '  ';
-            // Insert StopPoint after endIdx first so indices don't shift
-            lines.splice(endIdx + 1, 0, `${indent}StopPoint();  /* Trace Window Stop */`);
-            // Insert StartPoint before startIdx
-            lines.splice(startIdx, 0, `${indent}StartPoint(); /* Trace Window Start */`);
+            const marker = exports.TRACE_WINDOW_MARKERS[mode];
+            // Insert the closing call after endIdx first so indices don't shift
+            lines.splice(endIdx + 1, 0, `${indent}${marker.close} ${marker.closeNote}`);
+            lines.splice(startIdx, 0, `${indent}${marker.open} ${marker.openNote}`);
             fs.writeFileSync(filePath, lines.join('\n'), 'utf8');
+            await this.injectIncludes(filePath);
             return {
                 success: true,
-                message: `Wrapped lines ${fromLine}..${toLine} with StartPoint() & StopPoint() in ${path.basename(filePath)}`
+                message: `Wrapped lines ${fromLine}..${toLine} with ${marker.label} in ${path.basename(filePath)}`
             };
         }
         catch (error) {
@@ -245,6 +305,84 @@ class CodeInjector {
         return { cPath, hPath };
     }
     /**
+     * Rewrites the ViewInst registers inside an ETM_Configure() body.
+     *
+     * Two shapes are supported. If the driver still carries the
+     * #if ETM_BRINGUP_TRACE_ALL switch, the macro in ETMv4.h is flipped and
+     * the body is left alone. Otherwise TRCVIPCSSCTLR and TRCVICTLR are
+     * rewritten directly.
+     *
+     *   unconditional : VIPCSSCTL = 0, VICTL = 0x201
+     *                   ViewInst is always active, so the window is bounded by
+     *                   Enable_ETM() / Disable_ETM().
+     *   DWT gated     : VIPCSSCTL = comp0 start / comp1 stop, VICTL = 0x1
+     *                   ViewInst opens on StartPoint() and closes on StopPoint().
+     */
+    static applyViewInstToBody(body, isUnconditional, hPath) {
+        if (body.includes('#if ETM_BRINGUP_TRACE_ALL')) {
+            if (hPath && fs.existsSync(hPath)) {
+                let hContent = fs.readFileSync(hPath, 'utf8');
+                if (/#define\s+ETM_BRINGUP_TRACE_ALL\s+[01]/.test(hContent)) {
+                    hContent = hContent.replace(/#define\s+ETM_BRINGUP_TRACE_ALL\s+[01]/, `#define ETM_BRINGUP_TRACE_ALL  ${isUnconditional ? '1' : '0'}`);
+                    fs.writeFileSync(hPath, hContent, 'utf8');
+                }
+            }
+            return body;
+        }
+        const victlVal = isUnconditional ? '0x00000201' : '0x00000001';
+        const vipcssctlVal = isUnconditional ? '0x00000000' : '(1U << (16 + 1)) | (1U << 0)';
+        const note = isUnconditional
+            ? '    // Unconditional: ViewInst always active; gate with Enable_ETM()/Disable_ETM()'
+            : '    // DWT-gated: PE comparator 0 starts, comparator 1 stops';
+        let out = body;
+        if (/ETM\s*->\s*VIPCSSCTL\s*=\s*[^;]+;/.test(out)) {
+            out = out.replace(/(?:[ \t]*\/\/[^\r\n]*\r?\n)?[ \t]*ETM\s*->\s*VIPCSSCTL\s*=\s*[^;]+;/, `${note}\n    ETM->VIPCSSCTL = ${vipcssctlVal};`);
+        }
+        if (/ETM\s*->\s*VICTL\s*=\s*[^;]+;/.test(out)) {
+            out = out.replace(/ETM\s*->\s*VICTL\s*=\s*[^;]+;/, `ETM->VICTL     = ${victlVal};`);
+        }
+        return out;
+    }
+    /**
+     * Applies only the trace window mode to ETMv4.c, leaving every other
+     * setting in the driver untouched.
+     *
+     * This is what the mode selector in Tab 1 calls, so choosing a mode and
+     * choosing a Trace ID stay independent of each other.
+     */
+    static async setTraceWindowMode(workspaceRoot, mode) {
+        try {
+            const { cPath, hPath } = this.findDriverFiles(workspaceRoot);
+            if (!cPath || !fs.existsSync(cPath)) {
+                return {
+                    success: false,
+                    message: 'ETMv4.c was not found in the project. Add the driver files first.'
+                };
+            }
+            const cContent = fs.readFileSync(cPath, 'utf8');
+            const funcRegex = /(void\s+ETM_Configure\s*\([^)]*\)\s*\{)([\s\S]*?)(\n\})/m;
+            const funcMatch = cContent.match(funcRegex);
+            if (!funcMatch) {
+                return {
+                    success: false,
+                    message: `Could not locate ETM_Configure() in ${path.basename(cPath)}.`
+                };
+            }
+            const body = this.applyViewInstToBody(funcMatch[2], mode === 'trace_all', hPath);
+            fs.writeFileSync(cPath, cContent.replace(funcRegex, `${funcMatch[1]}${body}${funcMatch[3]}`), 'utf8');
+            const marker = exports.TRACE_WINDOW_MARKERS[mode];
+            return {
+                success: true,
+                message: mode === 'trace_all'
+                    ? `Trace window mode: Unconditional (Trace All). ETMv4.c now sets VIPCSSCTL = 0 and VICTL = 0x201; bound your window with ${marker.label}.`
+                    : `Trace window mode: DWT Start/Stop Gated. ETMv4.c now sets VIPCSSCTL = comp0/comp1 and VICTL = 0x1; bound your window with ${marker.label}.`
+            };
+        }
+        catch (error) {
+            return { success: false, message: `Failed to set trace window mode: ${error.message}` };
+        }
+    }
+    /**
      * Reads current ETM configuration values directly from ETMv4.c and ETMv4.h.
      */
     static readEtmConfig(workspaceRoot) {
@@ -281,18 +419,24 @@ class CodeInjector {
                     enableTS = true;
                 }
             }
+            // Which source is authoritative depends on the driver's shape, not on
+            // whether the header happens to exist: a driver that has had the
+            // #if compiled out keeps a stale ETM_BRINGUP_TRACE_ALL in its header
+            // that no longer controls anything.
             let viewInstMode = 'dwt_gated';
-            if (hPath && fs.existsSync(hPath)) {
-                const hContent = fs.readFileSync(hPath, 'utf8');
-                const bringupMatch = hContent.match(/#define\s+ETM_BRINGUP_TRACE_ALL\s+([01])/);
-                if (bringupMatch && bringupMatch[1] === '1') {
-                    viewInstMode = 'unconditional';
+            if (cContent.includes('#if ETM_BRINGUP_TRACE_ALL')) {
+                if (hPath && fs.existsSync(hPath)) {
+                    const hContent = fs.readFileSync(hPath, 'utf8');
+                    const bringupMatch = hContent.match(/#define\s+ETM_BRINGUP_TRACE_ALL\s+([01])/);
+                    if (bringupMatch && bringupMatch[1] === '1') {
+                        viewInstMode = 'unconditional';
+                    }
                 }
             }
-            else {
-                if (cContent.includes('ETM->VICTL = 0x00000201;') && !cContent.includes('#if ETM_BRINGUP_TRACE_ALL')) {
-                    viewInstMode = 'unconditional';
-                }
+            else if (/ETM\s*->\s*VICTL\s*=\s*0x0*201\s*;/i.test(cContent)) {
+                // Whitespace-tolerant: the driver aligns these assignments, so an
+                // exact string match misses "ETM->VICTL     = 0x00000201;".
+                viewInstMode = 'unconditional';
             }
             return {
                 traceId,
@@ -369,27 +513,7 @@ class CodeInjector {
             }
             // 5. Update ViewInst mode
             const isUnconditional = params.viewInstMode === 'unconditional';
-            if (body.includes('#if ETM_BRINGUP_TRACE_ALL')) {
-                // Update macro in ETMv4.h if exists
-                if (hPath && fs.existsSync(hPath)) {
-                    let hContent = fs.readFileSync(hPath, 'utf8');
-                    if (/#define\s+ETM_BRINGUP_TRACE_ALL\s+[01]/.test(hContent)) {
-                        hContent = hContent.replace(/#define\s+ETM_BRINGUP_TRACE_ALL\s+[01]/, `#define ETM_BRINGUP_TRACE_ALL  ${isUnconditional ? '1' : '0'}`);
-                        fs.writeFileSync(hPath, hContent, 'utf8');
-                    }
-                }
-            }
-            else {
-                // Directly update VIPCSSCTL and VICTL inside function
-                const victlVal = isUnconditional ? '0x00000201' : '0x00000001';
-                const vipcssctlVal = isUnconditional ? '0x00000000' : '(1U << (16 + 1)) | (1U << 0)';
-                if (/ETM\s*->\s*VIPCSSCTL\s*=\s*[^;]+;/.test(body)) {
-                    body = body.replace(/ETM\s*->\s*VIPCSSCTL\s*=\s*[^;]+;/, `ETM->VIPCSSCTL = ${vipcssctlVal};`);
-                }
-                if (/ETM\s*->\s*VICTL\s*=\s*[^;]+;/.test(body)) {
-                    body = body.replace(/ETM\s*->\s*VICTL\s*=\s*[^;]+;/, `ETM->VICTL = ${victlVal};`);
-                }
-            }
+            body = this.applyViewInstToBody(body, isUnconditional, hPath);
             const newContent = cContent.replace(funcRegex, `${funcMatch[1]}${body}${funcMatch[3]}`);
             fs.writeFileSync(cPath, newContent, 'utf8');
             return {

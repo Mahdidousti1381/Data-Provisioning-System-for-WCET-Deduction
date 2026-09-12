@@ -39,6 +39,26 @@ const vscode = __importStar(require("vscode"));
 const panel_1 = require("./webview/panel");
 const templateManager_1 = require("./templateManager");
 const codeInjector_1 = require("./codeInjector");
+const traceMode_1 = require("./traceMode");
+/** Wraps the active selection, reporting through the usual notifications. */
+async function wrapActiveSelection(mode) {
+    const activeEditor = vscode.window.activeTextEditor;
+    if (!activeEditor) {
+        vscode.window.showWarningMessage('Please select the code block you wish to trace.');
+        return;
+    }
+    if (activeEditor.selection.isEmpty) {
+        vscode.window.showWarningMessage(`Select the code to bound with ${codeInjector_1.TRACE_WINDOW_MARKERS[mode].label} first.`);
+        return;
+    }
+    const res = await codeInjector_1.CodeInjector.wrapSelectionWithStartStop(activeEditor, mode);
+    if (res.success) {
+        vscode.window.showInformationMessage(res.message);
+    }
+    else {
+        vscode.window.showErrorMessage(res.message);
+    }
+}
 function activate(context) {
     console.log('CoreSight Trace Studio extension is now active.');
     const templateManager = new templateManager_1.TemplateManager(context);
@@ -76,19 +96,52 @@ function activate(context) {
             vscode.window.showErrorMessage(res.message);
         }
     });
-    // 4. Wrap Selection with Start/Stop
+    // 4. Wrap Selection - uses whichever mode is configured in Tab 1 / Settings
     const wrapSelectionCmd = vscode.commands.registerCommand('coresight.wrapSelection', async () => {
-        const activeEditor = vscode.window.activeTextEditor;
-        if (!activeEditor) {
-            vscode.window.showWarningMessage('Please select the code block you wish to trace.');
+        await wrapActiveSelection((0, traceMode_1.getTraceMode)());
+    });
+    // 4a/4b. Same, but forcing a mode - so the editor context menu can offer
+    // both without the user having to go and change a setting first.
+    const wrapStartStopCmd = vscode.commands.registerCommand('coresight.wrapSelectionStartStop', async () => {
+        await wrapActiveSelection('dwt_gated');
+    });
+    const wrapEnableDisableCmd = vscode.commands.registerCommand('coresight.wrapSelectionEnableDisable', async () => {
+        await wrapActiveSelection('trace_all');
+    });
+    // 4c. Pick the mode, and offer to write it into ETMv4.c straight away -
+    // the two have to agree or the window will not behave as the code reads.
+    const setTraceModeCmd = vscode.commands.registerCommand('coresight.setTraceMode', async () => {
+        const current = (0, traceMode_1.getTraceMode)();
+        const picked = await vscode.window.showQuickPick([
+            {
+                label: 'DWT Start/Stop Gated',
+                description: current === 'dwt_gated' ? '(current)' : '',
+                detail: 'ViewInst gated by the DWT comparators. Bound windows with StartPoint() / StopPoint().',
+                mode: 'dwt_gated'
+            },
+            {
+                label: 'Unconditional (Trace All)',
+                description: current === 'trace_all' ? '(current)' : '',
+                detail: 'ViewInst always active. Bound windows with Enable_ETM() / Disable_ETM().',
+                mode: 'trace_all'
+            }
+        ], { placeHolder: 'Trace window mode' });
+        if (!picked) {
             return;
         }
-        const res = await codeInjector_1.CodeInjector.wrapSelectionWithStartStop(activeEditor);
-        if (res.success) {
-            vscode.window.showInformationMessage(res.message);
+        await (0, traceMode_1.setTraceMode)(picked.mode);
+        const folders = vscode.workspace.workspaceFolders;
+        if (folders && folders.length > 0) {
+            const res = await codeInjector_1.CodeInjector.setTraceWindowMode(folders[0].uri.fsPath, picked.mode);
+            if (res.success) {
+                vscode.window.showInformationMessage(res.message);
+            }
+            else {
+                vscode.window.showWarningMessage(`Mode set to ${picked.label}, but ETMv4.c was not updated: ${res.message}`);
+            }
         }
         else {
-            vscode.window.showErrorMessage(res.message);
+            vscode.window.showInformationMessage(`Trace window mode set to ${picked.label}.`);
         }
     });
     // 5. Status Bar Item for Quick Access
@@ -97,7 +150,7 @@ function activate(context) {
     statusBarItem.text = '$(pulse) CoreSight Studio';
     statusBarItem.tooltip = 'Open ARM CoreSight & ETMv4 Trace Studio';
     statusBarItem.show();
-    context.subscriptions.push(openStudioCmd, addDriversCmd, injectConfigCmd, wrapSelectionCmd, statusBarItem);
+    context.subscriptions.push(openStudioCmd, addDriversCmd, injectConfigCmd, wrapSelectionCmd, wrapStartStopCmd, wrapEnableDisableCmd, setTraceModeCmd, statusBarItem);
 }
 function deactivate() {
     // Clean up resources if needed

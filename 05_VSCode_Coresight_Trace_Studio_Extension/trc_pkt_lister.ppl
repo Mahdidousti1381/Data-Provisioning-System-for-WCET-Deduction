@@ -1,0 +1,56 @@
+Trace Packet Lister: CS Decode library testing
+-----------------------------------------------
+
+** Library Version : 1.8.3
+
+Test Command Line:-
+/root/mahdi/DecodeWorkspace/OpenCSD/decoder/tests/bin/builddir/trc_pkt_lister   -help  
+
+Trace Packet Lister - commands
+
+Snapshot:
+
+-ss_dir <dir>       Set the directory path to a trace snapshot
+-ss_verbose         Verbose output when reading the snapshot
+
+Decode:
+
+-id <n>             Set an ID to list (may be used multiple times) - default if no id set is for all IDs to be printed
+-src_name <name>    List packets from a given snapshot source name (defaults to first source found)
+-multi_session      List packets from all sources - assumes same config for all (ignored if -src_name used)
+-dstream_format     Input is DSTREAM framed.
+-tpiu               Input from TPIU - sync by FSYNC.
+-tpiu_hsync         Input from TPIU - sync by FSYNC and HSYNC.
+-decode             Full decode of the packets from the trace snapshot (default is to list undecoded packets only)
+-decode_only        Does not list the undecoded packets, just the trace decode.
+-o_raw_packed       Output raw packed trace frames
+-o_raw_unpacked     Output raw unpacked trace data per ID
+-src_addr_n         ETE protocol: Split source address ranges on N atoms
+-stats              Output packet processing statistics (if available).
+-no_time_print      Do not output the elapsed time for tests.
+
+Consistency checks
+
+-aa64_opcode_chk    Check for correct AA64 opcodes (MSW != 0x0000)
+-direct_br_cond     Check for incorrect N atom on direct unconditional branches
+-strict_br_cond     Strict conditional checks - look for incorrect N atom on all unconditional branches.
+-range_cont         Range continuity checks - check next range after N atom is continuous.
+-halt_err           Halt on bad packet error (default attempts to resync).
+
+Development:
+Options used during develop and test of the library
+
+-profile            Mute logging output while profiling library performance
+-test_waits <N>     Force wait from packet printer for N packets - test the wait/flush mechanisms for the decoder
+-macc_cache_disable Switch off caching on memory accessor
+-macc_cache_p_size  Set size of caching pages
+-macc_cache_p_num   Set number of caching pages
+
+Output:
+   Setting any of these options cancels the default output to file & stdout,
+   using _only_ the options supplied.
+
+-logstdout          Output to stdout -> console.
+-logstderr          Output to stderr.
+-logfile            Output to default file - trc_pkt_lister.ppl
+-logfilename <name> Output to file <name> 

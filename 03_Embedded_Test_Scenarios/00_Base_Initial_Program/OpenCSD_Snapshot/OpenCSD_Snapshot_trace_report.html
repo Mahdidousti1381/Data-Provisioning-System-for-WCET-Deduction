@@ -1,0 +1,506 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Trace Report - OpenCSD_Snapshot</title>
+    <style>
+        :root {
+            --bg: #0d1117;
+            --card: #161b22;
+            --border: #30363d;
+            --text: #c9d1d9;
+            --heading: #f0f6fc;
+            --muted: #8b949e;
+            --blue: #58a6ff;
+            --green: #3fb950;
+            --purple: #bc8cff;
+            --orange: #f0883e;
+            --red: #f85149;
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            line-height: 1.5;
+            padding: 30px 20px;
+        }
+        .container { max-width: 1180px; margin: 0 auto; }
+        .header {
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 22px 26px;
+            margin-bottom: 20px;
+        }
+        h1 { color: var(--heading); font-size: 22px; margin-bottom: 6px; }
+        .meta { color: var(--muted); font-size: 13px; display: flex; gap: 20px; flex-wrap: wrap; margin-top: 8px; }
+        .badge {
+            display: inline-block;
+            padding: 2px 10px;
+            border-radius: 12px;
+            font-size: 11px;
+            font-weight: 600;
+            background: rgba(88, 166, 255, 0.15);
+            color: var(--blue);
+            border: 1px solid rgba(88, 166, 255, 0.3);
+        }
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+            gap: 16px;
+            margin-bottom: 20px;
+        }
+        .card {
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 20px;
+        }
+        .metric-title {
+            font-size: 12px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: var(--muted);
+            margin-bottom: 8px;
+        }
+        .metric-val {
+            font-size: 24px;
+            font-weight: 700;
+            color: var(--heading);
+            font-family: ui-monospace, SFMono-Regular, monospace;
+        }
+        .metric-sub { font-size: 12px; color: var(--muted); margin-top: 4px; }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 13px;
+            margin: 10px 0;
+        }
+        th, td {
+            padding: 9px 12px;
+            text-align: left;
+            border-bottom: 1px solid var(--border);
+        }
+        th { color: var(--muted); font-weight: 600; background: rgba(0,0,0,0.25); }
+        code {
+            font-family: ui-monospace, SFMono-Regular, monospace;
+            background: rgba(110,118,129,0.2);
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-size: 12px;
+            color: #79c0ff;
+        }
+        .progress-bar {
+            height: 12px;
+            background: #21262d;
+            border-radius: 6px;
+            overflow: hidden;
+            display: flex;
+            margin: 10px 0;
+        }
+        .bar-isr { background: var(--red); height: 100%; }
+        .bar-main { background: var(--green); height: 100%; }
+        .note { font-size: 12px; color: var(--muted); margin-top: 10px; }
+        .verdict {
+            font-size: 13px;
+            border-left: 3px solid var(--blue);
+            padding: 8px 12px;
+            background: rgba(88,166,255,0.07);
+            margin-top: 10px;
+        }
+        .scroll { overflow-x: auto; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <span class="badge">Hardware Trace Report</span>
+            <h1 style="margin-top: 10px;">CoreSight Trace Execution &amp; Timing Report</h1>
+            <div class="meta">
+                <span>Snapshot: <code>OpenCSD_Snapshot</code></span>
+                <span>Source: <code>OpenCSD_Snapshot_decoded_3.ppl</code></span>
+                <span>Generated: 9/12/2026, 4:04:50 PM</span>
+                <span>Core: <code>1 MHz</code></span>
+                <span>TSG: <code>1 MHz</code></span>
+            </div>
+        </div>
+
+        <div class="grid">
+            <div class="card" style="margin-bottom: 0;">
+                <div class="metric-title">Trace Window Duration</div>
+                <div class="metric-val" style="color: var(--blue);">496.188 ms</div>
+                <div class="metric-sub">496,188 ticks &rarr; 496,188 µs @ 1 MHz</div>
+            </div>
+            <div class="card" style="margin-bottom: 0;">
+                <div class="metric-title">Processor Core Cycles</div>
+                <div class="metric-val" style="color: var(--green);">496,228</div>
+                <div class="metric-sub">Average CPI: <b>2.13</b> (233,210 instrs)</div>
+            </div>
+            <div class="card" style="margin-bottom: 0;">
+                <div class="metric-title">Exception Occurrences</div>
+                <div class="metric-val" style="color: var(--purple);">497</div>
+                <div class="metric-sub">Period: <b>999.998 µs</b> &middot; max depth 1</div>
+            </div>
+            <div class="card" style="margin-bottom: 0;">
+                <div class="metric-title">Total Time in All ISRs</div>
+                <div class="metric-val" style="color: var(--orange);">16864.0 µs</div>
+                <div class="metric-sub">16,864 cycles &middot; 3.4% of CPU &middot; mean 34 cycles / invocation</div>
+            </div>
+        </div>
+
+        
+        <div class="card" style="border-color: rgba(240,136,62,0.5);">
+            <h2 style="font-size: 15px; margin-bottom: 12px; color: var(--orange);">Decoder Warnings</h2>
+            <ul style="margin-left: 18px; font-size: 13px;">
+                <li style="margin-bottom: 6px;">1 of 497 exceptions are missing an entry or exit timestamp; their duration is reported as N/A and they are excluded from timing statistics.</li><li style="margin-bottom: 6px;">1 handlers were still active when the trace ended.</li><li style="margin-bottom: 6px;">1036 bytes at the head of the capture were discarded before the first A-Sync packet. This is normal: the ETM only emits a sync pattern every TRCSYNCPR bytes, so a capture started at an arbitrary instant always loses up to one sync period. It does not mean the logic analyser missed data.</li>
+            </ul>
+        </div>
+
+        <div class="card">
+            <h2 style="font-size: 15px; margin-bottom: 12px; color: var(--heading);">1. Clock Configuration &amp; Calibration</h2>
+            <p class="note" style="margin-top:0;">Every µs figure in this report is derived from the clock values supplied in the decoder panel. The trace stream does not encode them.</p>
+            <table>
+                <tbody>
+                    <tr><td style="width: 35%;"><strong>Core Clock</strong></td><td><b>1 MHz</b></td></tr>
+                    <tr><td><strong>Timestamp Clock (TSG)</strong></td><td><b>1 MHz</b> &mdash; 1 tick = 1.0000 µs</td></tr>
+                    <tr><td><strong>Measured ticks per cycle</strong></td><td><b>0.999919</b> (&Delta;TS &divide; total CYCLE_COUNT cycles)</td></tr>
+                </tbody>
+            </table>
+            <div class="verdict">Consistent. The trace gives 0.999919 ticks per core cycle, matching the 1 MHz / 1 MHz pair you supplied (expected 1). 1 tick = 1.0000 µs. The TSG advances once per core cycle on this board, so timestamp resolution tracks the core clock.</div>
+        </div>
+
+        <div class="card">
+            <h2 style="font-size: 15px; margin-bottom: 12px; color: var(--heading);">2. Stream Synchronisation</h2>
+            <table>
+                <tbody>
+                    <tr><td style="width: 35%;"><strong>Bytes discarded before first sync</strong></td><td><b>1,036</b></td></tr>
+                    <tr><td><strong><code>I_NOT_SYNC</code> elements</strong></td><td>144</td></tr>
+                    <tr><td><strong>First <code>I_ASYNC</code> at byte</strong></td><td>1,036</td></tr>
+                    <tr><td><strong>A-Sync packets in capture</strong></td><td>93</td></tr>
+                    <tr><td><strong>Mean sync period</strong></td><td>1,026 bytes</td></tr>
+                </tbody>
+            </table>
+            <p class="note">The head of every capture is unsynchronised. The ETM emits its alignment-sync pattern only once per <code>TRCSYNCPR</code> period, so a capture started at an arbitrary instant must wait up to a full period before the decoder can lock on. Those bytes are valid trace data that cannot be interpreted without a preceding sync point &mdash; not data the logic analyser failed to record. Lower <code>TRCSYNCPR</code> to shorten this head, at the cost of trace-port bandwidth.</p>
+        </div>
+
+        <div class="card">
+            <h2 style="font-size: 15px; margin-bottom: 12px; color: var(--heading);">3. Hardware Timestamps &amp; Window Timing</h2>
+            <table>
+                <tbody>
+                    <tr><td style="width: 35%;"><strong>1st Timestamp (post-sync)</strong></td><td><code>0x52274610</code></td></tr>
+                    <tr><td><strong>Last Timestamp (Trace Window End)</strong></td><td><code>0x522ED84C</code></td></tr>
+                    <tr><td><strong>Trace Window (&Delta;TS)</strong></td><td><b>496,188 ticks</b></td></tr>
+                    <tr><td><strong>Trace Window Duration</strong></td><td><b>496,188 µs (496.188 ms)</b></td></tr>
+                    <tr><td><strong>Total Instructions Decoded</strong></td><td>233,210 instructions</td></tr>
+                    <tr><td><strong>Total Clock Cycles</strong></td><td>496,228 cycles</td></tr>
+                    <tr><td><strong>Average CPI</strong></td><td>2.13 cycles/instruction</td></tr>
+                    <tr><td><strong>Branch Atoms (<code>I_ATOM</code>)</strong></td><td>34,320 branch decisions</td></tr>
+                    <tr><td><strong>Trace Packet Lines</strong></td><td>188,723</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <div class="card">
+            <h2 style="font-size: 15px; margin-bottom: 12px; color: var(--heading);">4. Interrupt &amp; Exception Handling Performance</h2>
+            <p class="note" style="margin-top:0;">
+                ISR duration spans the <b>entry timestamp</b> (first <code>TIMESTAMP</code> inside the handler, emitted by the ETM in response to the exception)
+                to the <b>exit timestamp</b> (first <code>TIMESTAMP</code> after <code>EXCEPTION_RET</code>).
+                It <b>includes</b> exception entry latency and <b>excludes</b> the unstacking after the return, so it is a
+                <b>lower bound</b> on the interference seen by the preempted thread.
+            </p>
+            <table>
+                <tbody>
+                    <tr><td style="width: 35%;"><strong><code>EXCEPTION</code> / <code>EXCEPTION_RET</code> elements</strong></td><td>497 / 496</td></tr>
+                    <tr><td><strong>Records produced</strong></td><td><b>497</b> &mdash; all exceptions accounted for</td></tr>
+                    <tr><td><strong>Records missing a timestamp</strong></td><td>1 (excluded from timing statistics)</td></tr>
+                    <tr><td><strong>Max nesting depth</strong></td><td>1 &mdash; no preemption</td></tr>
+                </tbody>
+            </table>
+            <p class="note">
+                Execution split: <b>3.4% in ISRs</b> (16,864 cycles) vs.
+                <b>96.60% in Main Thread</b> (479,364 cycles).
+            </p>
+            <div class="progress-bar">
+                <div class="bar-isr" style="width: 3.4%;" title="ISR: 3.4%"></div>
+                <div class="bar-main" style="width: 96.6%;" title="Main Thread: 96.60%"></div>
+            </div>
+
+            <h3 style="font-size: 13px; margin: 18px 0 10px 0; color: var(--heading);">CPU Execution Split by ISR Type:</h3>
+            <div class="scroll">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Exception / ISR Type</th><th>Vector</th><th>Count</th><th>Period</th>
+                        <th>Mean Duration</th><th>Max Duration (observed)</th><th>Max Cycles</th>
+                        <th>Mean Instrs</th><th>Max Instrs</th><th>CPU % Share</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    
+                        <tr>
+                            <td><span style="color: var(--purple); font-weight: 600;">SysTick (0x0F)</span></td>
+                            <td><code>0X0F</code></td>
+                            <td>497</td>
+                            <td>999.998 µs</td>
+                            <td>34.000 µs</td>
+                            <td><b style="color: var(--red);">34.000 µs</b></td>
+                            <td>34</td>
+                            <td>8</td>
+                            <td>8</td>
+                            <td><span style="color: var(--orange); font-weight: 600;">3.4%</span></td>
+                        </tr>
+                    
+                </tbody>
+            </table>
+            </div>
+            <p class="note">Max duration is the largest observed value &mdash; a high-water mark, not a proven worst case.</p>
+
+            <h3 style="font-size: 13px; margin: 18px 0 10px 0; color: var(--heading);">Timestamps Before and After IRQ Service Routines:</h3>
+            <div class="scroll">
+            <table>
+                <thead>
+                    <tr>
+                        <th>#</th><th>Type</th><th>Depth</th><th>Pre-IRQ TS</th><th>Entry TS</th><th>Exit TS</th>
+                        <th>&Delta;TS (ticks)</th><th>Duration</th><th>Cycles</th><th>Instrs</th><th>Est. Entry Ovh</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    
+                        <tr>
+                            <td>1</td>
+                            <td><span style="color: var(--purple); font-weight: 600;">SysTick (0x0F)</span></td>
+                            <td>0</td>
+                            <td><code>0x52274610</code></td>
+                            <td><code>0x522746CD</code></td>
+                            <td><code>0x522746EF</code></td>
+                            <td>34</td>
+                            <td><b>34.000 µs</b></td>
+                            <td>34</td>
+                            <td>8</td>
+                            <td>17</td>
+                        </tr>
+                    
+                        <tr>
+                            <td>2</td>
+                            <td><span style="color: var(--purple); font-weight: 600;">SysTick (0x0F)</span></td>
+                            <td>0</td>
+                            <td><code>0x522746EF</code></td>
+                            <td><code>0x52274AB4</code></td>
+                            <td><code>0x52274AD6</code></td>
+                            <td>34</td>
+                            <td><b>34.000 µs</b></td>
+                            <td>34</td>
+                            <td>8</td>
+                            <td>17</td>
+                        </tr>
+                    
+                        <tr>
+                            <td>3</td>
+                            <td><span style="color: var(--purple); font-weight: 600;">SysTick (0x0F)</span></td>
+                            <td>0</td>
+                            <td><code>0x52274AD6</code></td>
+                            <td><code>0x52274E9D</code></td>
+                            <td><code>0x52274EBF</code></td>
+                            <td>34</td>
+                            <td><b>34.000 µs</b></td>
+                            <td>34</td>
+                            <td>8</td>
+                            <td>17</td>
+                        </tr>
+                    
+                        <tr>
+                            <td>4</td>
+                            <td><span style="color: var(--purple); font-weight: 600;">SysTick (0x0F)</span></td>
+                            <td>0</td>
+                            <td><code>0x52274EBF</code></td>
+                            <td><code>0x52275284</code></td>
+                            <td><code>0x522752A6</code></td>
+                            <td>34</td>
+                            <td><b>34.000 µs</b></td>
+                            <td>34</td>
+                            <td>8</td>
+                            <td>17</td>
+                        </tr>
+                    
+                        <tr>
+                            <td>5</td>
+                            <td><span style="color: var(--purple); font-weight: 600;">SysTick (0x0F)</span></td>
+                            <td>0</td>
+                            <td><code>0x522752A6</code></td>
+                            <td><code>0x5227566D</code></td>
+                            <td><code>0x5227568F</code></td>
+                            <td>34</td>
+                            <td><b>34.000 µs</b></td>
+                            <td>34</td>
+                            <td>8</td>
+                            <td>17</td>
+                        </tr>
+                    
+                        <tr>
+                            <td>6</td>
+                            <td><span style="color: var(--purple); font-weight: 600;">SysTick (0x0F)</span></td>
+                            <td>0</td>
+                            <td><code>0x5227568F</code></td>
+                            <td><code>0x52275A54</code></td>
+                            <td><code>0x52275A76</code></td>
+                            <td>34</td>
+                            <td><b>34.000 µs</b></td>
+                            <td>34</td>
+                            <td>8</td>
+                            <td>17</td>
+                        </tr>
+                    
+                        <tr>
+                            <td>249</td>
+                            <td><span style="color: var(--purple); font-weight: 600;">SysTick (0x0F)</span></td>
+                            <td>0</td>
+                            <td><code>0x522B0BC7</code></td>
+                            <td><code>0x522B0F8C</code></td>
+                            <td><code>0x522B0FAE</code></td>
+                            <td>34</td>
+                            <td><b>34.000 µs</b></td>
+                            <td>34</td>
+                            <td>8</td>
+                            <td>17</td>
+                        </tr>
+                    
+                        <tr>
+                            <td>250</td>
+                            <td><span style="color: var(--purple); font-weight: 600;">SysTick (0x0F)</span></td>
+                            <td>0</td>
+                            <td><code>0x522B0FAE</code></td>
+                            <td><code>0x522B1375</code></td>
+                            <td><code>0x522B1397</code></td>
+                            <td>34</td>
+                            <td><b>34.000 µs</b></td>
+                            <td>34</td>
+                            <td>8</td>
+                            <td>17</td>
+                        </tr>
+                    
+                        <tr>
+                            <td>494</td>
+                            <td><span style="color: var(--purple); font-weight: 600;">SysTick (0x0F)</span></td>
+                            <td>0</td>
+                            <td><code>0x522EC8CE</code></td>
+                            <td><code>0x522ECC95</code></td>
+                            <td><code>0x522ECCB7</code></td>
+                            <td>34</td>
+                            <td><b>34.000 µs</b></td>
+                            <td>34</td>
+                            <td>8</td>
+                            <td>17</td>
+                        </tr>
+                    
+                        <tr>
+                            <td>495</td>
+                            <td><span style="color: var(--purple); font-weight: 600;">SysTick (0x0F)</span></td>
+                            <td>0</td>
+                            <td><code>0x522ECFC1</code></td>
+                            <td><code>0x522ED07C</code></td>
+                            <td><code>0x522ED09E</code></td>
+                            <td>34</td>
+                            <td><b>34.000 µs</b></td>
+                            <td>34</td>
+                            <td>8</td>
+                            <td>17</td>
+                        </tr>
+                    
+                        <tr>
+                            <td>496</td>
+                            <td><span style="color: var(--purple); font-weight: 600;">SysTick (0x0F)</span></td>
+                            <td>0</td>
+                            <td><code>0x522ED09E</code></td>
+                            <td><code>0x522ED465</code></td>
+                            <td><code>0x522ED487</code></td>
+                            <td>34</td>
+                            <td><b>34.000 µs</b></td>
+                            <td>34</td>
+                            <td>8</td>
+                            <td>17</td>
+                        </tr>
+                    
+                        <tr style="background: rgba(248,81,73,0.08);">
+                            <td>497 &#9888;</td>
+                            <td><span style="color: var(--purple); font-weight: 600;">SysTick (0x0F)</span></td>
+                            <td>0</td>
+                            <td><code>0x522ED487</code></td>
+                            <td><code>0x522ED84C</code></td>
+                            <td><code>N/A</code></td>
+                            <td>N/A</td>
+                            <td><b>N/A</b></td>
+                            <td>N/A</td>
+                            <td>8</td>
+                            <td>N/A</td>
+                        </tr>
+                    
+                </tbody>
+            </table>
+            </div>
+            <p class="note">
+                Representative samples across the trace window. Total exception occurrences: 497.
+                A bracketed instruction count is the inclusive figure (this handler plus anything that preempted it).
+                &ldquo;Est. Entry Ovh&rdquo; is <code>cycles &minus; instructions &times; CPI</code>, an estimate of exception entry latency.
+            </p>
+        </div>
+
+        <div class="card">
+            <h2 style="font-size: 15px; margin-bottom: 12px; color: var(--heading);">5. Execution Hotspots (Address Distribution)</h2>
+            <table>
+                <thead>
+                    <tr><th>Rank</th><th>Address Range</th><th>Instructions Executed</th><th>Share</th></tr>
+                </thead>
+                <tbody>
+                    
+                        <tr>
+                            <td>1</td>
+                            <td><code>0x80009ec</code></td>
+                            <td>98,244</td>
+                            <td><b>42.13%</b></td>
+                        </tr>
+                    
+                        <tr>
+                            <td>2</td>
+                            <td><code>0x80009c8</code></td>
+                            <td>97,250</td>
+                            <td><b>41.7%</b></td>
+                        </tr>
+                    
+                        <tr>
+                            <td>3</td>
+                            <td><code>0x80009e8</code></td>
+                            <td>32,748</td>
+                            <td><b>14.04%</b></td>
+                        </tr>
+                    
+                        <tr>
+                            <td>4</td>
+                            <td><code>0x80009b0</code></td>
+                            <td>3,479</td>
+                            <td><b>1.49%</b></td>
+                        </tr>
+                    
+                        <tr>
+                            <td>5</td>
+                            <td><code>0x80009ca</code></td>
+                            <td>992</td>
+                            <td><b>0.43%</b></td>
+                        </tr>
+                    
+                        <tr>
+                            <td>6</td>
+                            <td><code>0x80007f0</code></td>
+                            <td>497</td>
+                            <td><b>0.21%</b></td>
+                        </tr>
+                    
+                </tbody>
+            </table>
+            <p class="note">Instructions are attributed to the start address of each decoded <code>exec range</code>, not to individual addresses.</p>
+        </div>
+    </div>
+</body>
+</html>

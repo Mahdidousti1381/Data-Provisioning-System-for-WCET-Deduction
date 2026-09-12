@@ -20,6 +20,11 @@
     const fromLine = document.getElementById('fromLine');
     const toLine = document.getElementById('toLine');
     const btnWrapLines = document.getElementById('btnWrapLines');
+    const traceModeSelect = document.getElementById('traceModeSelect');
+    const btnApplyTraceMode = document.getElementById('btnApplyTraceMode');
+    const traceModeHint = document.getElementById('traceModeHint');
+    const wrapPairHintSel = document.getElementById('wrapPairHintSel');
+    const wrapPairHintLines = document.getElementById('wrapPairHintLines');
 
     // DOM Elements - Tab 2
     const captureFilePath = document.getElementById('captureFilePath');
@@ -47,8 +52,11 @@
     const btnBrowseSnapshot = document.getElementById('btnBrowseSnapshot');
     const decodeElfPath = document.getElementById('decodeElfPath');
     const btnBrowseDecodeElf = document.getElementById('btnBrowseDecodeElf');
+    const decoderBinaryPath = document.getElementById('decoderBinaryPath');
+    const btnBrowseDecoderBin = document.getElementById('btnBrowseDecoderBin');
     const decoderType = document.getElementById('decoderType');
     const coreFreqMhz = document.getElementById('coreFreqMhz');
+    const tsFreqMhz = document.getElementById('tsFreqMhz');
     const decodeInstructions = document.getElementById('decodeInstructions');
     const decodeOnly = document.getElementById('decodeOnly');
     const decodeStats = document.getElementById('decodeStats');
@@ -117,8 +125,60 @@
         });
     });
 
+    // ---- Trace window mode -------------------------------------------------
+    // Tab 1 owns this choice. It decides which pair of calls gets injected and
+    // how ETMv4.c configures ViewInst, so the two can never disagree.
+    const TRACE_MODE_INFO = {
+        dwt_gated: {
+            pair: 'StartPoint() / StopPoint()',
+            hint: 'ViewInst is gated by the DWT comparators. The window is the address range '
+                + 'between <code>StartPoint()</code> and <code>StopPoint()</code>, matched in hardware.'
+        },
+        trace_all: {
+            pair: 'Enable_ETM() / Disable_ETM()',
+            hint: 'ViewInst is unconditional. The window is bounded by switching the trace unit '
+                + 'itself with <code>Enable_ETM()</code> and <code>Disable_ETM()</code>, and every '
+                + 'enable emits a fresh synchronisation sequence.'
+        }
+    };
+
+    function currentTraceMode() {
+        return (traceModeSelect && traceModeSelect.value === 'trace_all') ? 'trace_all' : 'dwt_gated';
+    }
+
+    function renderTraceMode() {
+        const info = TRACE_MODE_INFO[currentTraceMode()];
+        if (traceModeHint) { traceModeHint.innerHTML = info.hint; }
+        if (wrapPairHintSel) { wrapPairHintSel.textContent = info.pair; }
+        if (wrapPairHintLines) { wrapPairHintLines.textContent = info.pair; }
+        // Tab 2 shows the same setting under its ETM register names.
+        if (viewInstMode) {
+            viewInstMode.value = currentTraceMode() === 'trace_all' ? 'unconditional' : 'dwt_gated';
+        }
+    }
+
+    if (traceModeSelect) {
+        traceModeSelect.addEventListener('change', renderTraceMode);
+    }
+
+    if (btnApplyTraceMode) {
+        btnApplyTraceMode.addEventListener('click', () => {
+            vscode.postMessage({ command: 'setTraceMode', mode: currentTraceMode() });
+        });
+    }
+
+    // Tab 2's selector is the same setting seen from the register side.
+    if (viewInstMode) {
+        viewInstMode.addEventListener('change', () => {
+            if (traceModeSelect) {
+                traceModeSelect.value = viewInstMode.value === 'unconditional' ? 'trace_all' : 'dwt_gated';
+                renderTraceMode();
+            }
+        });
+    }
+
     btnWrapSelection.addEventListener('click', () => {
-        vscode.postMessage({ command: 'wrapSelection' });
+        vscode.postMessage({ command: 'wrapSelection', mode: currentTraceMode() });
     });
 
     btnWrapLines.addEventListener('click', () => {
@@ -139,7 +199,8 @@
             command: 'wrapLines',
             filePath: filePath,
             fromLine: start,
-            toLine: end
+            toLine: end,
+            mode: currentTraceMode()
         });
     });
 
@@ -269,6 +330,17 @@
         });
     });
 
+    if (btnBrowseDecoderBin) {
+        btnBrowseDecoderBin.addEventListener('click', () => {
+            vscode.postMessage({
+                command: 'browseFile',
+                targetId: 'decoderBinaryPath',
+                title: 'Select trc_pkt_lister Executable',
+                filters: { 'All Files': ['*'] }
+            });
+        });
+    }
+
     btnRunDecoder.addEventListener('click', () => {
         const snap = decodeSnapshotPath.value.trim();
         if (!snap) {
@@ -280,7 +352,9 @@
             snapshotPath: snap,
             elfPath: decodeElfPath.value.trim() || undefined,
             decoderType: decoderType.value,
-            coreFreqMhz: parseFloat(coreFreqMhz.value) || 480,
+            customBinaryPath: (decoderBinaryPath && decoderBinaryPath.value.trim()) || undefined,
+            coreFreqMhz: parseFloat(coreFreqMhz.value) || 1,
+            tsFreqMhz: parseFloat(tsFreqMhz && tsFreqMhz.value) || 1,
             decodeInstructions: decodeInstructions.checked,
             decodeOnly: decodeOnly.checked,
             stats: decodeStats.checked
@@ -318,6 +392,7 @@
         }
 
         const freq = parseFloat(coreFreqMhz.value) || 1;
+        const tsFreq = parseFloat(tsFreqMhz && tsFreqMhz.value) || 1;
         const stats = latestDecoderResult && latestDecoderResult.stats ? latestDecoderResult.stats : {
             totalInstructions: parseInt(metricInstructions.textContent.replace(/,/g, ''), 10) || 0,
             totalCycles: parseInt(metricCycles.textContent.replace(/,/g, ''), 10) || 0,
@@ -330,6 +405,7 @@
             params: {
                 snapshotPath: snap,
                 coreFreqMhz: freq,
+                tsFreqMhz: tsFreq,
                 stats: stats,
                 exportFileName: latestDecoderResult ? latestDecoderResult.exportFileName : undefined
             }
@@ -361,6 +437,24 @@
                     if (cfg.viewInstMode !== undefined) { viewInstMode.value = cfg.viewInstMode; }
                     if (cfg.enableCCI !== undefined) { enableCCI.checked = cfg.enableCCI; }
                     if (cfg.enableTS !== undefined) { enableTS.checked = cfg.enableTS; }
+                }
+                // The saved setting wins over whatever the driver currently reads
+                // as, so the selector shows what the next injection will do.
+                if (message.traceMode && traceModeSelect) {
+                    traceModeSelect.value = message.traceMode;
+                }
+                renderTraceMode();
+                break;
+            }
+
+            case 'traceModeSet': {
+                if (message.mode && traceModeSelect) {
+                    traceModeSelect.value = message.mode;
+                    renderTraceMode();
+                }
+                if (snapTerminal && message.result) {
+                    snapTerminal.textContent += `[MODE] ${message.result.message}\n`;
+                    snapTerminal.scrollTop = snapTerminal.scrollHeight;
                 }
                 break;
             }

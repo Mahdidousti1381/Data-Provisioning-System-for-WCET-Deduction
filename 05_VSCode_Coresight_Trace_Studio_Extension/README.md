@@ -60,7 +60,8 @@ It bridges firmware configuration, hardware pinout mapping, logic analyzer captu
 *   Integrates with `TraceStreamProcessor.py` and Linaro OpenCSD.
 *   Allows selecting a raw logic capture file (`.csv` / `.bin`) and automatically builds the OpenCSD snapshot.
 *   Invokes `trc_pkt_lister` to stream disassembly to auto-numbered export files (`<snapshot>_decoded_<N>.ppl`).
-*   **Cycle-Accurate Metric Extraction**: Parses canonical `OCSD_GEN_TRC_ELEM_CYCLE_COUNT` elements to prevent metadata double-counting, accurately verifying core clock frequency against hardware timestamps (e.g., 496,228 cycles in 496,222 µs = 1.000012 MHz).
+*   **Cycle-Accurate Metric Extraction**: Parses canonical `OCSD_GEN_TRC_ELEM_CYCLE_COUNT` elements to prevent metadata double-counting.
+*   **Clock Calibration Cross-Check**: Timestamps are raw TSG ticks; the tick duration is *not* encoded in the trace, so **Core Clock** and **Timestamp Clock** are operator inputs. The report prints the measured ratio of timestamp ticks to core cycles and flags any supplied pair that contradicts it. On the STM32H7 the TSG is core-clocked, so the ratio is ~1.000 (e.g., 496,222 ticks against 496,228 cycles = 0.999988) - meaning 1 tick = 1 µs at a 1 MHz HCLK, but 0.1 µs at 10 MHz. Set the frequencies to match the firmware's actual PLL configuration, not the part maximum.
 *   **Instant Report Export**: One-click generation of concise, data-driven **HTML** and **Markdown** reports:
     *   Trace window duration ($\Delta\text{TS}$) and sync acquisition timestamps.
     *   Interrupt / Exception (IRQ) tracking: Pre-IRQ thread timestamp, Entry TS, Exit TS, ISR elapsed time ($\mu\text{s}$), and core execution cycles.

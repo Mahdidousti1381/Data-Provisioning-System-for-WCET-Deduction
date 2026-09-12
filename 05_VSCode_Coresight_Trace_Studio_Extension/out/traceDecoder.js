@@ -37,6 +37,7 @@ exports.TraceDecoder = void 0;
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
 const child_process_1 = require("child_process");
+const decoderLocator_1 = require("./decoderLocator");
 class TraceDecoder {
     workspaceRoot;
     constructor(workspaceRoot) {
@@ -78,18 +79,8 @@ class TraceDecoder {
             };
             let command = '';
             let args = [];
-            if (params.decoderType === 'python_decoder') {
-                command = params.pythonPath || 'python';
-                const decoderScript = path.join(this.workspaceRoot, 'TempDecoder_V0.2.py');
-                const scriptToUse = fs.existsSync(decoderScript)
-                    ? decoderScript
-                    : path.join(this.workspaceRoot, 'TraceStreamProcessor.py');
-                args = [scriptToUse, snapDir];
-                if (params.elfPath) {
-                    args.push(params.elfPath);
-                }
-            }
-            else if (params.decoderType === 'wsl_trc_pkt_lister') {
+            let spawnEnv = process.env;
+            if (params.decoderType === 'wsl_trc_pkt_lister') {
                 command = 'wsl';
                 const tplBin = params.customBinaryPath || 'trc_pkt_lister';
                 const wslSnapDir = snapDir.replace(/^([a-zA-Z]):/, (_, drive) => `/mnt/${drive.toLowerCase()}`).replace(/\\/g, '/');
@@ -109,7 +100,31 @@ class TraceDecoder {
                 }
             }
             else {
-                command = params.customBinaryPath || 'trc_pkt_lister';
+                // OpenCSD is built, not installed: resolve the executable and the
+                // directories holding libopencsd.so rather than trusting PATH.
+                const located = (0, decoderLocator_1.locateDecoder)({
+                    explicitPath: params.customBinaryPath,
+                    workspaceRoot: this.workspaceRoot
+                });
+                if (!located.found) {
+                    exportStream.end();
+                    try {
+                        fs.unlinkSync(exportFilePath);
+                    }
+                    catch { /* best effort */ }
+                    const msg = (0, decoderLocator_1.formatLocateFailure)(located, params.customBinaryPath);
+                    onLog(msg, 'error');
+                    return resolve({ success: false, message: `Decoder executable not found: ${located.binaryName}` });
+                }
+                command = located.command;
+                spawnEnv = (0, decoderLocator_1.decoderEnv)(located.libDirs);
+                onLog(`[DECODER] Using ${command}\n          resolved via ${located.source}`, 'info');
+                if (located.libDirs.length > 0) {
+                    onLog(`[DECODER] Library path: ${located.libDirs.join(path.delimiter)}`, 'info');
+                }
+                else {
+                    onLog(`[DECODER] No libopencsd shared libraries found near the executable; if it aborts with "libopencsd.so.1: cannot open shared object file", set LD_LIBRARY_PATH to your OpenCSD decoder/lib directory.`, 'error');
+                }
                 args = ['-ss_dir', snapDir, '-logstdout'];
                 if (params.decodeOnly) {
                     args.push('-decode_only');
@@ -125,7 +140,7 @@ class TraceDecoder {
             onLog(`[EXPORT] Streaming full disassembly to: ${exportFileName}\n`, 'info');
             let proc;
             try {
-                proc = (0, child_process_1.spawn)(command, args, { cwd: this.workspaceRoot });
+                proc = (0, child_process_1.spawn)(command, args, { cwd: this.workspaceRoot, env: spawnEnv });
             }
             catch (err) {
                 exportStream.end();
@@ -265,7 +280,13 @@ class TraceDecoder {
                 if (exportStream) {
                     exportStream.end();
                 }
-                onLog(`[PROCESS ERROR] ${err.message}`, 'error');
+                if (err && err.code === 'ENOENT') {
+                    onLog(`[PROCESS ERROR] "${command}" could not be executed (ENOENT). `
+                        + `The file is missing, is not executable, or its interpreter is absent.`, 'error');
+                }
+                else {
+                    onLog(`[PROCESS ERROR] ${err.message}`, 'error');
+                }
                 resolve({
                     success: false,
                     message: `Error running decoder: ${err.message}`

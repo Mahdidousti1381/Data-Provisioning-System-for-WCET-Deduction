@@ -43,6 +43,7 @@ CoreSight_Trace_Framework_Deliverables/
 │   ├── 01_TimerTest_Periodic_100us/                    # ETM non-intrusiveness & interference test
 │   ├── 02_FreqTest_Scalability_and_Sync/               # Frequency scalability & sustained loop
 │   ├── 03_Routine_Irq_Multi_Interrupt/                 # Multi-routine algorithms, SVC & hardware ISRs
+│   ├── 04_ProjectsDay_WCET_Demo/                       # Live defence demo + presenter runbook
 │   └── README.md
 │
 ├── 04_Python_Trace_Decoder/
@@ -89,6 +90,7 @@ CoreSight_Trace_Framework_Deliverables/
     2.  **`01_TimerTest_Periodic_100us`**: Proves ETM zero-overhead claim by showing zero jitter in a 100 µs (10 kHz) periodic timer (`TIM6`). Firmware was scrubbed of temporary files and obsolete test code. Includes sanitized TPIU binary (`_tpiu.bin`), complete OpenCSD snapshot, and decoded logs (`success.log` and `193100.log`).
     3.  **`02_FreqTest_Scalability_and_Sync`**: Stress-tests trace bandwidth and periodic A-Sync synchronization over 10.4 million decoded instructions. Includes compact native session `.dsl` (27 MB), extracted TPIU stream (`_tpiu.bin`), and full execution log (`195532.log`).
     4.  **`03_Routine_Irq_Multi_Interrupt`**: Multi-routine execution (Checksum, Bubble Sort, SVC syscall) with asynchronous UART interrupts from a Raspberry Pi Pico and button EXTI. Includes extracted TPIU stream (`_tpiu.bin`), OpenCSD snapshot, and decoded log (`134532.log`).
+    5.  **`04_ProjectsDay_WCET_Demo`**: The live demonstration scenario built for the Projects Day defence. It is an ordinary STM32CubeIDE HAL application containing **no trace code at all** - no counters, no timestamps, no instrumentation. The only trace-related lines in the project are the three CoreSight Trace Studio injects into `main.c` (`Parallel_Trace_configure()`, `StartPoint()`, `StopPoint()`), so every timing figure in the demonstration is recovered from four data pins and a clock pin. A single button press produces a window of a few milliseconds carrying one artefact for every poster claim: a **measured WCET pair** (one routine, best-case and worst-case inputs, identical results, an order-of-magnitude difference in cycles) and a **nested interrupt preemption** (a priority-0 TIM6 tick entering while the priority-1 USART1 callback is still running). Ships with `PROJECTS_DAY_GUIDE.md`, a step-by-step booth runbook, and `Host_Tools/verify_demo.py`, which reduces a `.ppl` decode to a PASS/FAIL table against those claims.
 
 ### `04_Python_Trace_Decoder`
 *   Features **`TraceStreamProcessor.py`**, which automatically reconstructs 4-bit parallel logic captures into TPIU frames, extracts memory sections from the firmware ELF, builds OpenCSD snapshots, and runs `trc_pkt_lister`.
@@ -100,7 +102,7 @@ CoreSight_Trace_Framework_Deliverables/
     *   Pinout visualization and DSLogic wiring guides.
     *   Interactive visual bitfield editor for ETMv4 registers (`TRCCONFIGR`, `TRCSYNCPR`, `TRCCCCTLR`).
     *   **Direct Firmware Synchronization**: Injects and updates configuration parameters directly into `ETMv4.c` in the active project workspace with silicon constraint enforcement (e.g. read-only `TRCSYNCPR` lock on Cortex-M7).
-    *   **High-Speed Decoder & Execution Analyzer**: Invokes `trc_pkt_lister` with automated snapshot manifests, streaming disassembly and extracting cycle-accurate statistics (filtering duplicate timestamp metadata to verify true clock cycles, e.g. 496,228 cycles in 496,222 µs = 1.000012 MHz).
+    *   **High-Speed Decoder & Execution Analyzer**: Invokes `trc_pkt_lister` with automated snapshot manifests, streaming disassembly and extracting cycle-accurate statistics. The core and timestamp-generator frequencies are supplied by the operator (the trace stream does not encode them); the analyzer then cross-checks them against the capture by reporting the measured timestamp-ticks-per-cycle ratio, and warns when the supplied pair is inconsistent with the trace. On the STM32H7 the TSG is core-clocked, so the ratio lands on ~1.000 (e.g. 496,222 ticks against 496,228 cycles = 0.999988).
     *   **One-Click Report Generation**: Exports comprehensive, data-driven **HTML** and **Markdown** reports containing active trace window duration ($\Delta\text{TS}$), detailed IRQ execution timelines (Pre-IRQ thread TS, Entry TS, Exit TS, duration, cycles, instructions), CPU execution split (ISR vs. Main), and code address hotspots.
 
 ### `06_ETMv4_Driver_Module`
@@ -115,5 +117,7 @@ CoreSight_Trace_Framework_Deliverables/
     Software-measured cycle counts (`DWT->CYCCNT`) and hardware-decoded timestamps (`I_TIMESTAMP`) independently confirmed that a 100 µs periodic timer experienced **$0.00\%$ timing distortion** during active trace emission.
 2.  **Instruction & Branch Reconstruction**:
     OpenCSD successfully decoded millions of instructions, reconstructing both conditional branch atoms (`E` / `N`) and asynchronous interrupt vector switches.
-3.  **Cost-Effective Workflow**:
+3.  **Nested Preemption and Interference Decomposition**:
+    Scenario 04 recovers, from the trace port alone, a high-priority timer interrupt entering while a lower-priority UART callback is still executing, and separates that callback's own execution cycles from its response time. The interference term of classical response-time analysis is thus measured on real silicon rather than estimated - from an application that carries no instrumentation of any kind.
+4.  **Cost-Effective Workflow**:
     Demonstrated that a sub-$300 commercial logic analyzer paired with open-source software (OpenCSD + Python) can substitute for expensive proprietary hardware trace probes (such as Lauterbach TRACE32 or IAR I-jet) for real-time verification and hybrid WCET bounding.

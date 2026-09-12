@@ -39,6 +39,7 @@ const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
 const templateManager_1 = require("../templateManager");
 const codeInjector_1 = require("../codeInjector");
+const traceMode_1 = require("../traceMode");
 const snapshotGenerator_1 = require("../snapshotGenerator");
 const traceDecoder_1 = require("../traceDecoder");
 const reportGenerator_1 = require("../reportGenerator");
@@ -96,6 +97,7 @@ class CoreSightPanel {
                     status,
                     dirs,
                     etmConfig,
+                    traceMode: (0, traceMode_1.getTraceMode)(),
                     workspaceRoot: this._workspaceRoot
                 });
                 break;
@@ -138,7 +140,8 @@ class CoreSightPanel {
                     vscode.window.showWarningMessage('Please open a source file and select code to wrap.');
                     return;
                 }
-                const res = await codeInjector_1.CodeInjector.wrapSelectionWithStartStop(activeEditor);
+                const mode = message.mode === 'trace_all' ? 'trace_all' : (0, traceMode_1.getTraceMode)();
+                const res = await codeInjector_1.CodeInjector.wrapSelectionWithStartStop(activeEditor, mode);
                 this._panel.webview.postMessage({
                     type: 'selectionWrapped',
                     result: res
@@ -152,7 +155,8 @@ class CoreSightPanel {
                 break;
             }
             case 'wrapLines': {
-                const res = await codeInjector_1.CodeInjector.wrapLinesWithStartStop(message.filePath, message.fromLine, message.toLine);
+                const lineMode = message.mode === 'trace_all' ? 'trace_all' : (0, traceMode_1.getTraceMode)();
+                const res = await codeInjector_1.CodeInjector.wrapLinesWithStartStop(message.filePath, message.fromLine, message.toLine, lineMode);
                 this._panel.webview.postMessage({
                     type: 'linesWrapped',
                     result: res
@@ -162,6 +166,28 @@ class CoreSightPanel {
                 }
                 else {
                     vscode.window.showErrorMessage(res.message);
+                }
+                break;
+            }
+            case 'setTraceMode': {
+                const mode = message.mode === 'trace_all' ? 'trace_all' : 'dwt_gated';
+                await (0, traceMode_1.setTraceMode)(mode);
+                // Keep the driver and the injected calls in agreement. Choosing
+                // "Trace All" but leaving ETMv4.c DWT-gated would produce a
+                // window that never opens, so the two are always written together.
+                const res = await codeInjector_1.CodeInjector.setTraceWindowMode(this._workspaceRoot, mode);
+                const etmConfig = codeInjector_1.CodeInjector.readEtmConfig(this._workspaceRoot);
+                this._panel.webview.postMessage({
+                    type: 'traceModeSet',
+                    mode,
+                    result: res,
+                    etmConfig
+                });
+                if (res.success) {
+                    vscode.window.showInformationMessage(res.message);
+                }
+                else {
+                    vscode.window.showWarningMessage(res.message);
                 }
                 break;
             }
@@ -250,6 +276,15 @@ class CoreSightPanel {
             }
             case 'runDecoder': {
                 const params = message.params;
+                if (!params.customBinaryPath) {
+                    // Fall back to the workspace/user setting when the field is blank.
+                    const configured = vscode.workspace
+                        .getConfiguration('coresightTraceStudio')
+                        .get('decoderPath');
+                    if (configured && configured.trim()) {
+                        params.customBinaryPath = configured.trim();
+                    }
+                }
                 this._panel.webview.postMessage({ type: 'decoderStarted' });
                 const res = await this._traceDecoder.runDecoder(params, (line, lineType) => {
                     this._panel.webview.postMessage({
@@ -297,6 +332,7 @@ class CoreSightPanel {
                     : (params.snapshotPath || this._workspaceRoot);
                 const snapshotName = path.basename(snapDir);
                 const coreFreqMhz = params.coreFreqMhz || 1;
+                const tsFreqMhz = params.tsFreqMhz || 1;
                 // Locate target .ppl disassembly file
                 let targetPpl = null;
                 if (params.exportFileName && fs.existsSync(params.exportFileName)) {
@@ -338,7 +374,7 @@ class CoreSightPanel {
                 let reportBaseName = `${snapshotName}_trace_report`;
                 if (targetPpl && fs.existsSync(targetPpl)) {
                     vscode.window.showInformationMessage(`Generating trace report from ${path.basename(targetPpl)}...`);
-                    const repResult = await reportGenerator_1.ReportGenerator.generateReportFromPpl(targetPpl, snapDir, this._workspaceRoot, coreFreqMhz);
+                    const repResult = await reportGenerator_1.ReportGenerator.generateReportFromPpl(targetPpl, snapDir, this._workspaceRoot, coreFreqMhz, tsFreqMhz);
                     htmlPath = repResult.htmlPath;
                     mdPath = repResult.mdPath;
                     reportBaseName = path.basename(htmlPath, '.html');

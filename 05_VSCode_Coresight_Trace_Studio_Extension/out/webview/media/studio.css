@@ -238,8 +238,14 @@ select:focus {
     gap: 8px;
 }
 
-.input-with-btn input {
+.input-with-btn input,
+.input-with-btn select {
     flex: 1;
+    min-width: 0;
+}
+
+.input-with-btn .btn {
+    white-space: nowrap;
 }
 
 .form-row {

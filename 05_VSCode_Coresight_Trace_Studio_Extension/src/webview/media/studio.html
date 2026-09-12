@@ -73,9 +73,25 @@
             <section class="card">
                 <div class="card-header">
                     <h2>🎯 Code Instrumentation (Trace Window Injection)</h2>
-                    <span class="card-hint">Inject start/stop gating and initialization</span>
+                    <span class="card-hint">Choose how the window is bounded, then inject</span>
                 </div>
                 <div class="card-body">
+                    <!-- Trace Window Mode -->
+                    <div class="form-group">
+                        <label for="traceModeSelect">Trace Window Mode:</label>
+                        <div class="input-with-btn">
+                            <select id="traceModeSelect">
+                                <option value="dwt_gated" selected>DWT Start/Stop Gated &mdash; StartPoint() / StopPoint()</option>
+                                <option value="trace_all">Unconditional (Trace All) &mdash; Enable_ETM() / Disable_ETM()</option>
+                            </select>
+                            <button id="btnApplyTraceMode" class="btn btn-secondary">Apply to ETMv4.c</button>
+                        </div>
+                        <span class="field-hint" id="traceModeHint">
+                            ViewInst is gated by the DWT comparators. The window is the address range
+                            between <code>StartPoint()</code> and <code>StopPoint()</code>, matched in hardware.
+                        </span>
+                    </div>
+
                     <div class="form-group">
                         <label for="targetSrcFile">Target C Source File:</label>
                         <div class="input-with-btn">
@@ -96,17 +112,19 @@
                             <button id="btnInjectConfig" class="btn btn-secondary">Inject Config Function</button>
                         </div>
 
-                        <!-- Action 2: Start/Stop Selected -->
+                        <!-- Action 2: Wrap Selection -->
                         <div class="action-card">
                             <h3>2. Trace Active Selection</h3>
-                            <p>Select code in VS Code editor, then click below to wrap with <code>StartPoint()</code> and <code>StopPoint()</code>.</p>
+                            <p>Select code in the VS Code editor, then click below to wrap it with
+                               <code id="wrapPairHintSel">StartPoint() / StopPoint()</code>.</p>
                             <button id="btnWrapSelection" class="btn btn-accent">Wrap Editor Selection</button>
                         </div>
 
                         <!-- Action 3: Line Range -->
                         <div class="action-card">
                             <h3>3. Trace Specific Line Range</h3>
-                            <p>Specify line numbers to surround with the trace measurement window.</p>
+                            <p>Specify line numbers to surround with
+                               <code id="wrapPairHintLines">StartPoint() / StopPoint()</code>.</p>
                             <div class="form-row">
                                 <div class="form-group">
                                     <label for="fromLine">From Line:</label>
@@ -249,7 +267,7 @@
             <section class="card">
                 <div class="card-header">
                     <h2>📂 Decoder Inputs & Execution Engine</h2>
-                    <span class="card-hint">Run OpenCSD or Python Decoder</span>
+                    <span class="card-hint">Run OpenCSD trc_pkt_lister</span>
                 </div>
                 <div class="card-body">
                     <div class="form-group">
@@ -268,20 +286,34 @@
                         </div>
                     </div>
 
+                    <div class="form-group">
+                        <label for="decoderBinaryPath">Decoder Binary Path (optional):</label>
+                        <div class="input-with-btn">
+                            <input type="text" id="decoderBinaryPath" placeholder="Auto-detect (leave blank) &mdash; e.g. /path/to/OpenCSD/decoder/tests/bin/builddir/trc_pkt_lister">
+                            <button id="btnBrowseDecoderBin" class="btn btn-secondary">Browse Binary</button>
+                        </div>
+                        <span class="field-hint">OpenCSD's build does not install <code>trc_pkt_lister</code> onto PATH. Leave blank to auto-detect; the shared-library path is handled for you.</span>
+                    </div>
+
                     <div class="form-row">
                         <div class="form-group">
                             <label for="decoderType">Decoder Backend:</label>
                             <select id="decoderType">
-                                <option value="python_decoder" selected>Python Decoder (TempDecoder_V0.2.py)</option>
-                                <option value="trc_pkt_lister">OpenCSD trc_pkt_lister (Native / Path)</option>
+                                <option value="trc_pkt_lister" selected>OpenCSD trc_pkt_lister (Native / Path)</option>
                                 <option value="wsl_trc_pkt_lister">OpenCSD via WSL (Linux trc_pkt_lister)</option>
                             </select>
                         </div>
 
                         <div class="form-group">
                             <label for="coreFreqMhz">Core Clock Frequency (MHz):</label>
-                            <input type="number" id="coreFreqMhz" value="480" min="1" max="1000">
-                            <span class="field-hint">Used for WCET calculation (STM32H7 = 480 MHz)</span>
+                            <input type="number" id="coreFreqMhz" value="1" min="0.001" max="1000" step="any">
+                            <span class="field-hint">HCLK actually configured by the firmware, not the part maximum</span>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="tsFreqMhz">Timestamp Clock / TSG (MHz):</label>
+                            <input type="number" id="tsFreqMhz" value="1" min="0.001" max="1000" step="any">
+                            <span class="field-hint">Rate of the CoreSight timestamp generator. On STM32H7 it runs at the core clock &mdash; the report prints the measured ticks/cycle ratio so you can verify it.</span>
                         </div>
                     </div>
 

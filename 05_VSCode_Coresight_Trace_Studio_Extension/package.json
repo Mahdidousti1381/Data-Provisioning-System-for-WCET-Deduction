@@ -2,7 +2,7 @@
   "name": "coresight-trace-studio",
   "displayName": "CoreSight Trace Studio",
   "description": "Complete ARM CoreSight & ETMv4 Parallel Trace Toolkit: Code Instrumentation, OpenCSD Snapshot Generation, and Trace Decoding",
-  "version": "0.4.6",
+  "version": "0.5.2",
   "icon": "icon.png",
   "publisher": "mahdidousti",
   "repository": {
@@ -50,19 +50,29 @@
       },
       {
         "command": "coresight.wrapSelection",
-        "title": "Wrap Selection with Trace Window (StartPoint / StopPoint)",
+        "title": "Wrap Selection with Trace Window (configured mode)",
+        "category": "CoreSight Trace"
+      },
+      {
+        "command": "coresight.wrapSelectionStartStop",
+        "title": "Wrap Selection with StartPoint() / StopPoint()",
+        "category": "CoreSight Trace"
+      },
+      {
+        "command": "coresight.wrapSelectionEnableDisable",
+        "title": "Wrap Selection with Enable_ETM() / Disable_ETM()",
+        "category": "CoreSight Trace"
+      },
+      {
+        "command": "coresight.setTraceMode",
+        "title": "Set Trace Window Mode (DWT Gated / Trace All)",
         "category": "CoreSight Trace"
       }
     ],
     "menus": {
       "editor/context": [
         {
-          "command": "coresight.wrapSelection",
-          "when": "editorHasSelection",
-          "group": "7_modification"
-        },
-        {
-          "command": "coresight.injectConfig",
+          "submenu": "coresight.contextMenu",
           "group": "7_modification"
         }
       ],
@@ -78,14 +88,82 @@
         },
         {
           "command": "coresight.wrapSelection"
+        },
+        {
+          "command": "coresight.wrapSelectionStartStop"
+        },
+        {
+          "command": "coresight.wrapSelectionEnableDisable"
+        },
+        {
+          "command": "coresight.setTraceMode"
+        }
+      ],
+      "coresight.contextMenu": [
+        {
+          "command": "coresight.wrapSelection",
+          "when": "editorHasSelection",
+          "group": "1_wrap@1"
+        },
+        {
+          "command": "coresight.wrapSelectionStartStop",
+          "when": "editorHasSelection",
+          "group": "1_wrap@2"
+        },
+        {
+          "command": "coresight.wrapSelectionEnableDisable",
+          "when": "editorHasSelection",
+          "group": "1_wrap@3"
+        },
+        {
+          "command": "coresight.injectConfig",
+          "group": "2_config@1"
+        },
+        {
+          "command": "coresight.setTraceMode",
+          "group": "2_config@2"
+        },
+        {
+          "command": "coresight.openStudio",
+          "group": "3_studio@1"
         }
       ]
-    }
+    },
+    "configuration": {
+      "title": "CoreSight Trace Studio",
+      "properties": {
+        "coresightTraceStudio.decoderPath": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "Absolute path to the OpenCSD `trc_pkt_lister` executable. Leave empty to auto-detect. OpenCSD's build does not install the binary, so it is normally found at `<opencsd>/decoder/tests/bin/builddir/trc_pkt_lister`. The matching `libopencsd` shared-library directory is added to the loader path automatically."
+        },
+        "coresightTraceStudio.traceMode": {
+          "type": "string",
+          "enum": [
+            "dwt_gated",
+            "trace_all"
+          ],
+          "enumDescriptions": [
+            "ViewInst is gated by the DWT comparators. Windows are bounded by StartPoint() and StopPoint(), matched in hardware.",
+            "ViewInst is unconditional. Windows are bounded by Enable_ETM() and Disable_ETM(), and every enable emits a fresh synchronisation sequence."
+          ],
+          "default": "dwt_gated",
+          "description": "How CoreSight Trace Studio bounds a trace window when instrumenting code."
+        }
+      }
+    },
+    "submenus": [
+      {
+        "id": "coresight.contextMenu",
+        "label": "CoreSight Trace"
+      }
+    ]
   },
   "scripts": {
     "vscode:prepublish": "npm run compile",
-    "compile": "tsc -p ./",
-    "watch": "tsc -watch -p ./"
+    "compile": "tsc -p ./ && npm run copy-media",
+    "watch": "tsc -watch -p ./",
+    "copy-media": "node -e \"require('fs').cpSync('src/webview/media','out/webview/media',{recursive:true})\""
   },
   "devDependencies": {
     "@types/node": "^20.11.0",
