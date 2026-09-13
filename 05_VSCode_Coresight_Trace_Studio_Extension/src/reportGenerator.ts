@@ -178,25 +178,31 @@ export interface TraceReportData {
     warnings: string[];
 }
 
+/**
+ * ETMv4 M-profile exception type -> name. This mirrors OpenCSD's own table
+ * (EtmV4ITrcPacket::exceptionInfo) exactly. The ETM encoding is NOT the NVIC
+ * vector number:
+ *   0x00-0x1F  fixed table (0x10-0x17 are IRQ0-IRQ7)
+ *   0x208-0x3EF  IRQ(n - 0x200), i.e. IRQ8 upwards
+ * so IRQ54 is traced as 0x236, not 54 + 16.
+ */
+const M_EXCEPTION_NAMES = [
+    'Reserved', 'Reset', 'NMI', 'HardFault',
+    'MemManage', 'BusFault', 'UsageFault', 'Reserved',
+    'Reserved', 'Reserved', 'Reserved', 'SVCall',
+    'DebugMonitor', 'Reserved', 'PendSV', 'SysTick',
+    'IRQ0', 'IRQ1', 'IRQ2', 'IRQ3',
+    'IRQ4', 'IRQ5', 'IRQ6', 'IRQ7',
+    'DebugHalt', 'LazyFP Push', 'Lockup', 'Reserved',
+    'Reserved', 'Reserved', 'Reserved', 'Reserved'
+];
+
 function getExceptionName(excepNumHex: string): string {
     const num = parseInt(excepNumHex, 16);
-    switch (num) {
-        case 1: return 'Reset';
-        case 2: return 'NMI';
-        case 3: return 'HardFault';
-        case 4: return 'MemManage';
-        case 5: return 'BusFault';
-        case 6: return 'UsageFault';
-        case 11: return 'SVCall';
-        case 12: return 'DebugMonitor';
-        case 14: return 'PendSV';
-        case 15: return 'SysTick';
-        default:
-            if (num >= 16) {
-                return `IRQ_${num - 16}`;
-            }
-            return `Exception`;
-    }
+    if (Number.isNaN(num)) return 'Exception';
+    if (num < 0x20) return M_EXCEPTION_NAMES[num];
+    if (num >= 0x208 && num <= 0x3EF) return `IRQ${num - 0x200}`;
+    return 'Reserved';
 }
 
 /** One active exception on the nesting stack. */
@@ -226,23 +232,28 @@ interface RawExc {
     prefRetAddr: string | null;
 }
 
-/** Normalise a vector name printed by the packet processor into a vector number. */
+/**
+ * Map a vector name printed by the packet processor back to the ETM exception
+ * type the decoder uses, so raw-only and decoded records share one label.
+ * Inverse of getExceptionName.
+ */
 function vectorNameToNum(name: string): string | null {
+    const fmt = (v: number) => '0x' + v.toString(16).toUpperCase().padStart(2, '0');
     const n = name.trim();
     const irq = n.match(/^IRQ\s*(\d+)$/i);
     if (irq) {
-        const num = parseInt(irq[1], 10) + 16;
-        return '0x' + num.toString(16).toUpperCase().padStart(2, '0');
+        const k = parseInt(irq[1], 10);
+        return fmt(k < 8 ? 0x10 + k : 0x200 + k);
     }
-    const named: { [k: string]: number } = {
-        reset: 1, nmi: 2, hardfault: 3, memmanage: 4, busfault: 5,
-        usagefault: 6, svcall: 11, svc: 11, debugmonitor: 12, pendsv: 14, systick: 15
-    };
     const key = n.toLowerCase().replace(/[^a-z]/g, '');
-    if (named[key] !== undefined) {
-        return '0x' + named[key].toString(16).toUpperCase().padStart(2, '0');
-    }
-    return null;
+    const aliases: { [k: string]: string } = { pereset: 'reset', svc: 'svcall' };
+    const target = aliases[key] || key;
+    // Skip the IRQ0-7 slots (handled above) and the Reserved entries.
+    const idx = M_EXCEPTION_NAMES.findIndex((x, i) =>
+        (i < 0x10 || i >= 0x18)
+        && x !== 'Reserved'
+        && x.toLowerCase().replace(/[^a-z]/g, '') === target);
+    return idx >= 0 ? fmt(idx) : null;
 }
 
 export class ReportGenerator {
@@ -712,6 +723,20 @@ export class ReportGenerator {
                 if (dec) {
                     dec.vectorName = raw.vectorName;
                     if (!dec.prefRetAddr) dec.prefRetAddr = raw.prefRetAddr;
+                    // The decoder stops seeing events when it desyncs, so a decoded
+                    // record left open can look "still running at end of trace"
+                    // while the raw packets show what really happened next. For
+                    // unreturned records, the raw layer's verdict wins.
+                    const rc = rawClosure.get(raw.traceIdx);
+                    if (dec.closure !== 'returned' && rc && rc.closure !== dec.closure) {
+                        dec.closure = rc.closure;
+                        dec.pairOk = rc.closure === 'returned';
+                        dec.pairNote = rc.note;
+                        if (inDeadRange(raw.traceIdx) || deadRanges.some(r => r.from > raw.traceIdx && r.from < (rawExceptions[rawExceptions.indexOf(raw) + 1]?.traceIdx ?? Infinity))) {
+                            dec.pairNote = (dec.pairNote ? dec.pairNote + ' ' : '')
+                                + 'The instruction decoder lost sync before this handler finished, so its exit was not decoded.';
+                        }
+                    }
                     decodedByIdx.delete(raw.traceIdx);
                     merged.push(dec);
                 } else {
