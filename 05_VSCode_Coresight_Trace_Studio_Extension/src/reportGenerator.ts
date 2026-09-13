@@ -57,6 +57,27 @@ export interface ExceptionRecord {
     threadTimeBeforeUs: number | null;
     /** False when entryTs or exitTs could not be recovered from the stream. */
     tsComplete: boolean;
+
+    /** Byte offset of the exception in the trace stream (the decoder's Idx). */
+    traceIdx: number | null;
+    /** Vector name as the packet processor printed it, e.g. "IRQ54", "SysTick". */
+    vectorName: string | null;
+    /**
+     * 'decoded' - reconstructed from OCSD_GEN_TRC_ELEM_EXCEPTION, with timing.
+     * 'raw'     - only the I_EXCEPT protocol packet survived; the instruction
+     *             decoder was desynchronised here, so no timing is available.
+     */
+    source: 'decoded' | 'raw';
+    /** Preferred return address carried by the exception. */
+    prefRetAddr: string | null;
+    /** Address execution actually resumed at after the matching return. */
+    resumeAddr: string | null;
+    /** How this exception ended. */
+    closure: 'returned' | 'no-return-dropped' | 'no-return-eot' | 'no-return-desync';
+    /** False when the entry/return pair failed validation. */
+    pairOk: boolean;
+    /** Why the pair is suspect, or how the exception ended unreturned. */
+    pairNote: string | null;
 }
 
 export interface IsrTypeBreakdown {
@@ -119,6 +140,29 @@ export interface TraceReportData {
     unclosedAtEof: number;
     maxNestingDepth: number;
 
+    // --- raw protocol packets, independent of the instruction decoder ---
+    rawExceptPackets: number;
+    rawExceptRtnPackets: number;
+    /** I_EXCEPT minus I_EXCEPT_RTN. Non-zero needs explaining. */
+    exceptionReturnDeficit: number;
+    /** Exceptions recovered from raw packets because no element was decoded. */
+    rawOnlyExceptions: number;
+    unreturnedExceptions: number;
+    droppedReturns: number;
+    pairMismatches: number;
+
+    // --- capture integrity ---
+    badPacketCount: number;
+    malformedSyncCount: number;
+    desyncEvents: { traceIdx: number; reason: string }[];
+    decoderErrors: { traceIdx: number | null; code: string; text: string }[];
+    /** Byte ranges in which the instruction decoder produced nothing. */
+    deadRanges: { from: number; to: number }[];
+    deadBytes: number;
+    traceByteLength: number;
+    captureHealthy: boolean;
+    captureVerdict: string;
+
     totalIsrCycles: number;
     avgIsrCycles: number;
     totalIsrDurationUs: number;
@@ -167,6 +211,38 @@ interface ExcFrame {
     ccBlockCycles: number;
     instructions: number;
     instructionsInclusive: number;
+    traceIdx: number | null;
+    prefRetAddr: string | null;
+    closure: 'returned' | 'no-return-dropped' | 'no-return-eot' | 'no-return-desync';
+    pairNote: string | null;
+    /** Set when the frame was popped by an EXCEPTION_RET (so a resume address is due). */
+    closedByRet: boolean;
+}
+
+/** An I_EXCEPT protocol packet, tracked independently of the decoder. */
+interface RawExc {
+    traceIdx: number;
+    vectorName: string;
+    prefRetAddr: string | null;
+}
+
+/** Normalise a vector name printed by the packet processor into a vector number. */
+function vectorNameToNum(name: string): string | null {
+    const n = name.trim();
+    const irq = n.match(/^IRQ\s*(\d+)$/i);
+    if (irq) {
+        const num = parseInt(irq[1], 10) + 16;
+        return '0x' + num.toString(16).toUpperCase().padStart(2, '0');
+    }
+    const named: { [k: string]: number } = {
+        reset: 1, nmi: 2, hardfault: 3, memmanage: 4, busfault: 5,
+        usagefault: 6, svcall: 11, svc: 11, debugmonitor: 12, pendsv: 14, systick: 15
+    };
+    const key = n.toLowerCase().replace(/[^a-z]/g, '');
+    if (named[key] !== undefined) {
+        return '0x' + named[key].toString(16).toUpperCase().padStart(2, '0');
+    }
+    return null;
 }
 
 export class ReportGenerator {
@@ -208,6 +284,30 @@ export class ReportGenerator {
         let exceptionRetElementCount = 0;
         let unmatchedRets = 0;
         let maxNestingDepth = 0;
+        let droppedReturns = 0;
+        let pairMismatches = 0;
+
+        // Raw protocol layer, parsed independently of the instruction decoder so
+        // that exceptions are still reported when the decoder loses sync.
+        const rawExceptions: RawExc[] = [];
+        const rawRetIdx: number[] = [];
+        let pendingRawAddr: RawExc | null = null;
+
+        // Capture integrity.
+        let badPacketCount = 0;
+        let malformedSyncCount = 0;
+        const desyncEvents: { traceIdx: number; reason: string }[] = [];
+        const decoderErrors: { traceIdx: number | null; code: string; text: string }[] = [];
+        const deadRanges: { from: number; to: number }[] = [];
+        let pendingDead: number | null = null;
+        let lastIdxSeen = 0;
+
+        /**
+         * Record closed by a return, still awaiting its resume address. Held in
+         * an object so that assignment from inside finalize() is visible to the
+         * loop's control-flow analysis.
+         */
+        const resumeWatch: { rec: ExceptionRecord | null } = { rec: null };
 
         const allExceptions: ExceptionRecord[] = [];
         /** Active handlers, innermost last. */
@@ -232,7 +332,7 @@ export class ReportGenerator {
                 ? ticksToUs(Number(f.entryTs - f.preTs))
                 : null;
 
-            allExceptions.push({
+            const rec: ExceptionRecord = {
                 index: f.index,
                 excepNum: f.excepNum,
                 type: f.type,
@@ -248,8 +348,19 @@ export class ReportGenerator {
                 instructionsInclusive: f.instructionsInclusive,
                 estEntryOverheadCycles: null, // filled once averageCpi is known
                 threadTimeBeforeUs,
-                tsComplete: f.entryTs !== null && f.exitTs !== null
-            });
+                tsComplete: f.entryTs !== null && f.exitTs !== null,
+                traceIdx: f.traceIdx,
+                vectorName: null,
+                source: 'decoded',
+                prefRetAddr: f.prefRetAddr,
+                resumeAddr: null,
+                closure: f.closure,
+                pairOk: f.closure === 'returned',
+                pairNote: f.pairNote
+            };
+            allExceptions.push(rec);
+            // A returned handler owes us a resume address to validate the pair.
+            if (f.closedByRet) resumeWatch.rec = rec;
         };
 
         /** No timestamp arrived before the stream moved on - commit without one. */
@@ -265,38 +376,106 @@ export class ReportGenerator {
         });
 
         for await (const line of rl) {
-            if (line.startsWith('Idx:')) totalPackets++;
+            // A decoder error message is sometimes printed as a prefix on the
+            // following packet line, so match the Idx anywhere, not just at the
+            // start, and record the error without consuming the line.
+            const idxM = line.match(/Idx:(\d+); ID:([0-9a-fA-F]+);/);
+            const idx = idxM ? parseInt(idxM[1], 10) : null;
+            const isElem = idxM ? idxM[2].toLowerCase() === '3e' : false;
+            if (idx !== null) {
+                totalPackets++;
+                if (idx > lastIdxSeen) lastIdxSeen = idx;
+            }
+
+            const errM = line.match(/(DCD_[A-Z0-9_]+)\s*:\s*0x[0-9a-fA-F]+\s*\(([A-Z0-9_]+)\)\s*\[([^\]]*)\]/);
+            if (errM) {
+                const tM = line.match(/TrcIdx=(\d+)/);
+                decoderErrors.push({
+                    traceIdx: tM ? parseInt(tM[1], 10) : idx,
+                    code: errM[2],
+                    text: errM[3]
+                });
+            }
+
+            // Any successfully decoded element ends a dead region.
+            if (isElem && pendingDead !== null && !line.includes('OCSD_GEN_TRC_ELEM_NO_SYNC')) {
+                deadRanges.push({ from: pendingDead, to: idx! });
+                pendingDead = null;
+            }
 
             // ---- raw protocol packets (ID:0) -------------------------------
-            if (line.includes('I_NOT_SYNC')) {
-                notSyncElementCount++;
-                const im = line.match(/^Idx:(\d+)/);
-                const bytes = (line.match(/0x[0-9a-fA-F]{2}/g) || []).length;
-                if (im) lastNotSyncEndIdx = parseInt(im[1], 10) + bytes;
-                continue;
-            }
-            if (line.includes('I_ASYNC')) {
-                const im = line.match(/^Idx:(\d+)/);
-                if (im) {
-                    const idx = parseInt(im[1], 10);
-                    if (firstSyncByteIdx === null) firstSyncByteIdx = idx;
-                    if (lastSyncByteIdx !== null) {
-                        syncPeriodSum += idx - lastSyncByteIdx;
-                        syncPeriodCount++;
-                    }
-                    lastSyncByteIdx = idx;
+            if (!isElem) {
+                // Checked before I_ASYNC: a corrupt sync pattern is reported as
+                // I_BAD_SEQUENCE ... [I_ASYNC] and must not count as a sync point.
+                if (line.includes('I_BAD_')) {
+                    badPacketCount++;
+                    if (line.includes('[I_ASYNC]')) malformedSyncCount++;
+                    continue;
                 }
-                syncPacketCount++;
-                continue;
-            }
-            if (line.includes('I_ATOM_')) {
-                totalAtoms++;
+                if (line.includes('I_NOT_SYNC')) {
+                    notSyncElementCount++;
+                    const bytes = (line.match(/0x[0-9a-fA-F]{2}/g) || []).length;
+                    if (idx !== null) lastNotSyncEndIdx = idx + bytes;
+                    continue;
+                }
+                if (line.includes('I_ASYNC')) {
+                    if (idx !== null) {
+                        if (firstSyncByteIdx === null) firstSyncByteIdx = idx;
+                        if (lastSyncByteIdx !== null) {
+                            syncPeriodSum += idx - lastSyncByteIdx;
+                            syncPeriodCount++;
+                        }
+                        lastSyncByteIdx = idx;
+                    }
+                    syncPacketCount++;
+                    continue;
+                }
+                if (line.includes('I_EXCEPT_RTN')) {
+                    if (idx !== null) rawRetIdx.push(idx);
+                    pendingRawAddr = null;
+                    continue;
+                }
+                if (/I_EXCEPT\s*:/.test(line)) {
+                    const vm = line.match(/I_EXCEPT\s*:\s*Exception\.;\s*([^;]+);/);
+                    const rec: RawExc = {
+                        traceIdx: idx !== null ? idx : lastIdxSeen,
+                        vectorName: vm ? vm[1].trim() : 'Unknown',
+                        prefRetAddr: null
+                    };
+                    rawExceptions.push(rec);
+                    // The preferred return address follows in the next address packet.
+                    pendingRawAddr = /Ret Addr Follows/i.test(line) ? rec : null;
+                    continue;
+                }
+                if (pendingRawAddr && line.includes('I_ADDR_')) {
+                    const am = line.match(/Addr=0x([0-9a-fA-F]+)/);
+                    if (am) {
+                        pendingRawAddr.prefRetAddr = '0x' + am[1].replace(/^0+/, '').toLowerCase();
+                        pendingRawAddr = null;
+                    }
+                    continue;
+                }
+                if (line.includes('I_ATOM_')) {
+                    totalAtoms++;
+                    continue;
+                }
                 continue;
             }
 
             // ---- decoded generic elements (ID:3e) --------------------------
             // Order matters: EXCEPTION_RET is checked before EXCEPTION so that a
             // tail-chained pair on adjacent lines is handled in stream order.
+
+            if (line.includes('OCSD_GEN_TRC_ELEM_NO_SYNC')) {
+                const rm = line.match(/NO_SYNC\(\s*\[([^\]]*)\]/);
+                const reason = rm ? rm[1] : 'unknown';
+                // "init-decoder" is the decoder's start state, not a fault.
+                if (reason !== 'init-decoder' && idx !== null) {
+                    desyncEvents.push({ traceIdx: idx, reason });
+                    if (pendingDead === null) pendingDead = idx;
+                }
+                continue;
+            }
 
             if (line.includes('OCSD_GEN_TRC_ELEM_TIMESTAMP(')) {
                 const tsM = line.match(/TS=0x([0-9a-fA-F]+)/);
@@ -342,6 +521,8 @@ export class ReportGenerator {
                     unmatchedRets++;
                     continue;
                 }
+                f.closure = 'returned';
+                f.closedByRet = true;
                 // No roll-up needed: every num_i already credited each frame on
                 // the stack, so ancestors have this handler's instructions.
                 awaitingExitTs.push(f);
@@ -356,6 +537,23 @@ export class ReportGenerator {
                 const exMatch = line.match(/excep num \((0x[0-9a-fA-F]+)\)/);
                 const exNum = exMatch ? exMatch[1].toLowerCase() : '0x00';
                 const hexFormatted = '0x' + parseInt(exNum, 16).toString(16).toUpperCase().padStart(2, '0');
+                const prefM = line.match(/pref ret addr:\s*(0x[0-9a-fA-F]+)/);
+
+                // A vector cannot preempt itself: same priority never preempts,
+                // and the NVIC cannot re-enter an active exception. Seeing the
+                // same vector taken while it is still on the stack therefore
+                // means the EXCEPTION_RET between the two was never decoded.
+                const dupAt = stack.findIndex(fr => fr.excepNum === hexFormatted);
+                if (dupAt >= 0) {
+                    for (let i = stack.length - 1; i >= dupAt; i--) {
+                        const lost = stack[i];
+                        lost.closure = 'no-return-dropped';
+                        lost.pairNote = `Vector ${hexFormatted} was taken again while still active - the EXCEPTION_RET between the two was lost.`;
+                        droppedReturns++;
+                        finalize(lost);
+                    }
+                    stack.length = dupAt;
+                }
 
                 const frame: ExcFrame = {
                     index: exceptionElementCount,
@@ -367,7 +565,12 @@ export class ReportGenerator {
                     exitTs: null,
                     ccBlockCycles: 0,
                     instructions: 0,
-                    instructionsInclusive: 0
+                    instructionsInclusive: 0,
+                    traceIdx: idx,
+                    prefRetAddr: prefM ? prefM[1].toLowerCase() : null,
+                    closure: 'no-return-eot',
+                    pairNote: null,
+                    closedByRet: false
                 };
                 stack.push(frame);
                 if (stack.length > maxNestingDepth) maxNestingDepth = stack.length;
@@ -378,6 +581,24 @@ export class ReportGenerator {
             if (numM) {
                 // Execution has resumed, so any pending return is settled.
                 flushAwaiting();
+
+                const startM = line.match(/exec range=(0x[0-9a-fA-F]+):/);
+                if (resumeWatch.rec && startM) {
+                    // The instruction stream resumes at the exception's preferred
+                    // return address. Anything else means the EXCEPTION /
+                    // EXCEPTION_RET we paired are not actually a pair.
+                    const resume = startM[1].toLowerCase();
+                    resumeWatch.rec.resumeAddr = resume;
+                    const expected = resumeWatch.rec.prefRetAddr;
+                    if (expected && resume !== expected) {
+                        resumeWatch.rec.pairOk = false;
+                        resumeWatch.rec.pairNote =
+                            `Resumed at ${resume} but the exception's preferred return address was ${expected}; `
+                            + `this entry/return pair does not match.`;
+                        pairMismatches++;
+                    }
+                    resumeWatch.rec = null;
+                }
 
                 const n = parseInt(numM[1], 10);
                 totalInstructions += n;
@@ -397,9 +618,139 @@ export class ReportGenerator {
         // End of stream: settle anything still pending.
         flushAwaiting();
         const unclosedAtEof = stack.length;
-        while (stack.length > 0) finalize(stack.pop()!);
+        while (stack.length > 0) {
+            const f = stack.pop()!;
+            f.closure = 'no-return-eot';
+            f.pairNote = 'Still active when the trace ended - the handler had not returned yet.';
+            finalize(f);
+        }
+        if (pendingDead !== null) {
+            deadRanges.push({ from: pendingDead, to: lastIdxSeen });
+            pendingDead = null;
+        }
 
         allExceptions.sort((a, b) => a.index - b.index);
+
+        // ---- reconcile against the raw protocol layer -----------------------
+        // The instruction decoder emits no EXCEPTION element while it is out of
+        // sync, but the packet processor still recovers the I_EXCEPT packets.
+        // Those exceptions really happened, so report them rather than dropping
+        // them; they simply carry no timing.
+        const inDeadRange = (i: number | null) =>
+            i !== null && deadRanges.some(r => i >= r.from && i <= r.to);
+
+        const synthesiseRaw = (raw: RawExc, closure: ExceptionRecord['closure'], note: string | null): ExceptionRecord => {
+            const vecNum = vectorNameToNum(raw.vectorName);
+            const label = vecNum ? `${getExceptionName(vecNum)} (${vecNum})` : raw.vectorName;
+            return {
+                index: 0,
+                excepNum: vecNum || raw.vectorName,
+                type: label,
+                depth: 0,
+                preTs: null, entryTs: null, exitTs: null,
+                durationTicks: null, isrDurationUs: null, cycles: null,
+                ccBlockCycles: 0, instructions: 0, instructionsInclusive: 0,
+                estEntryOverheadCycles: null, threadTimeBeforeUs: null,
+                tsComplete: false,
+                traceIdx: raw.traceIdx,
+                vectorName: raw.vectorName,
+                source: 'raw',
+                prefRetAddr: raw.prefRetAddr,
+                resumeAddr: null,
+                closure,
+                pairOk: closure === 'returned',
+                pairNote: note
+            };
+        };
+
+        let rawOnlyExceptions = 0;
+        let merged: ExceptionRecord[] = allExceptions;
+
+        if (rawExceptions.length > 0) {
+            // Pair the raw packets on their own, using the same same-vector rule,
+            // so raw-only exceptions still get a closure verdict.
+            const rawEvents: { idx: number; kind: 'exc' | 'ret'; raw?: RawExc }[] = [
+                ...rawExceptions.map(r => ({ idx: r.traceIdx, kind: 'exc' as const, raw: r })),
+                ...rawRetIdx.map(i => ({ idx: i, kind: 'ret' as const }))
+            ].sort((a, b) => a.idx - b.idx);
+
+            const rawClosure = new Map<number, { closure: ExceptionRecord['closure']; note: string | null }>();
+            const rawStack: RawExc[] = [];
+            for (const ev of rawEvents) {
+                if (ev.kind === 'exc') {
+                    const dupAt = rawStack.findIndex(f => f.vectorName === ev.raw!.vectorName);
+                    if (dupAt >= 0) {
+                        for (let i = rawStack.length - 1; i >= dupAt; i--) {
+                            rawClosure.set(rawStack[i].traceIdx, {
+                                closure: 'no-return-dropped',
+                                note: `${rawStack[i].vectorName} was taken again at byte ${ev.idx} while still active - the I_EXCEPT_RTN between the two was never captured.`
+                            });
+                        }
+                        rawStack.length = dupAt;
+                    }
+                    rawStack.push(ev.raw!);
+                } else {
+                    const f = rawStack.pop();
+                    if (f) rawClosure.set(f.traceIdx, { closure: 'returned', note: null });
+                }
+            }
+            for (const f of rawStack) {
+                rawClosure.set(f.traceIdx, {
+                    closure: 'no-return-eot',
+                    note: 'Still active when the trace ended - the handler had not returned yet.'
+                });
+            }
+
+            const decodedByIdx = new Map<number, ExceptionRecord>();
+            for (const r of allExceptions) {
+                if (r.traceIdx !== null) decodedByIdx.set(r.traceIdx, r);
+            }
+
+            merged = [];
+            for (const raw of rawExceptions) {
+                const dec = decodedByIdx.get(raw.traceIdx);
+                if (dec) {
+                    dec.vectorName = raw.vectorName;
+                    if (!dec.prefRetAddr) dec.prefRetAddr = raw.prefRetAddr;
+                    decodedByIdx.delete(raw.traceIdx);
+                    merged.push(dec);
+                } else {
+                    rawOnlyExceptions++;
+                    const rc = rawClosure.get(raw.traceIdx)
+                        || { closure: 'no-return-eot' as const, note: null };
+                    let closure = rc.closure;
+                    let note = rc.note;
+                    // Only the final exception can legitimately be unreturned
+                    // because the trace ended. An earlier one left open means
+                    // its return went missing.
+                    const isLast = raw === rawExceptions[rawExceptions.length - 1];
+                    if (closure === 'no-return-eot' && !isLast) {
+                        closure = inDeadRange(raw.traceIdx) ? 'no-return-desync' : 'no-return-dropped';
+                        note = 'No matching return was captured before the next exception.';
+                    }
+                    // A desync explains the missing timing, but never overrides a
+                    // specific packet-level diagnosis such as a lost return.
+                    if (inDeadRange(raw.traceIdx)) {
+                        note = (note ? note + ' ' : '')
+                            + 'The instruction decoder was out of sync over this byte range, so no timing could be recovered.';
+                    }
+                    merged.push(synthesiseRaw(raw, closure, note));
+                }
+            }
+            // Decoded records with no raw counterpart (raw packets suppressed).
+            for (const rest of decodedByIdx.values()) merged.push(rest);
+            merged.sort((a, b) => (a.traceIdx ?? 0) - (b.traceIdx ?? 0));
+            merged.forEach((r, i) => { r.index = i + 1; });
+        }
+
+        allExceptions.length = 0;
+        allExceptions.push(...merged);
+
+        // Recompute from the merged list so raw-only and decoded records are
+        // counted exactly once each.
+        const unreturnedExceptions = allExceptions.filter(e => e.closure !== 'returned').length;
+        droppedReturns = allExceptions.filter(e => e.closure === 'no-return-dropped').length;
+        pairMismatches = allExceptions.filter(e => e.closure === 'returned' && !e.pairOk).length;
 
         // ---- derived global figures ----------------------------------------
         const windowDurationTicks = (lastTs !== null && firstTs !== null) ? Number(lastTs - firstTs) : 0;
@@ -445,11 +796,77 @@ export class ReportGenerator {
                 + `Every µs and cycle figure below is wrong until one of the two fields is corrected.`;
         }
 
+        // ---- capture integrity ----------------------------------------------
+        const rawExceptPackets = rawExceptions.length;
+        const rawExceptRtnPackets = rawRetIdx.length;
+        const exceptionReturnDeficit = rawExceptPackets > 0
+            ? rawExceptPackets - rawExceptRtnPackets
+            : exceptionElementCount - exceptionRetElementCount;
+        const deadBytes = deadRanges.reduce((a, r) => a + (r.to - r.from), 0);
+        const traceByteLength = lastIdxSeen;
+
+        const captureHealthy = badPacketCount === 0
+            && malformedSyncCount === 0
+            && desyncEvents.length === 0
+            && droppedReturns === 0
+            && pairMismatches === 0;
+
+        const verdictParts: string[] = [];
+        if (captureHealthy) {
+            verdictParts.push('No capture faults detected: every packet decoded cleanly, the decoder never lost synchronisation, and every exception paired with a matching return.');
+        } else {
+            verdictParts.push('CAPTURE FAULTS DETECTED - this trace is incomplete and the figures below cover only the decodable parts.');
+            if (badPacketCount > 0) {
+                verdictParts.push(`${badPacketCount} malformed packet(s) were rejected by the protocol decoder.`);
+            }
+            if (malformedSyncCount > 0) {
+                verdictParts.push(`${malformedSyncCount} alignment-sync pattern(s) arrived corrupted. A valid A-Sync is eleven 0x00 bytes followed by 0x80; a short one means bytes were lost on the trace port, which is the clearest evidence of a sampling problem.`);
+            }
+            if (desyncEvents.length > 0) {
+                verdictParts.push(`The instruction decoder lost synchronisation ${desyncEvents.length} time(s) (first at byte ${desyncEvents[0].traceIdx}).`);
+            }
+            if (deadBytes > 0 && traceByteLength > 0) {
+                const pct = ((deadBytes / traceByteLength) * 100).toFixed(1);
+                verdictParts.push(`${deadBytes.toLocaleString()} of ${traceByteLength.toLocaleString()} bytes (${pct}%) produced no decoded instructions.`);
+            }
+            if (droppedReturns > 0) {
+                verdictParts.push(`${droppedReturns} exception return(s) were never captured.`);
+            }
+            if (pairMismatches > 0) {
+                verdictParts.push(`${pairMismatches} entry/return pair(s) failed the return-address check.`);
+            }
+            verdictParts.push('Most likely cause is trace-port sampling margin: check TRACECLK setup/hold at the logic analyser, lower the trace clock, or raise the sample rate.');
+        }
+        const captureVerdict = verdictParts.join(' ');
+
         // ---- warnings / self-check ------------------------------------------
         const warnings: string[] = [];
         const recordsWithMissingTs = allExceptions.filter(e => !e.tsComplete).length;
 
-        if (exceptionElementCount !== allExceptions.length) {
+        if (!captureHealthy) {
+            warnings.push(captureVerdict);
+        }
+        if (rawOnlyExceptions > 0) {
+            warnings.push(`${rawOnlyExceptions} of ${allExceptions.length} exceptions were recovered from raw I_EXCEPT packets because the instruction decoder produced no EXCEPTION element for them. They are listed with timing "N/A" - they did occur, but their duration cannot be measured from this capture.`);
+        }
+        if (exceptionReturnDeficit > 0) {
+            const openAtEot = allExceptions.filter(e => e.closure === 'no-return-eot').length;
+            const desynced = allExceptions.filter(e => e.closure === 'no-return-desync').length;
+            const parts = [`${rawExceptPackets || exceptionElementCount} exceptions were seen but only ${rawExceptRtnPackets || exceptionRetElementCount} returns - ${exceptionReturnDeficit} exception(s) never returned.`];
+            if (droppedReturns > 0) {
+                parts.push(`${droppedReturns} is/are confirmed LOST RETURNS: the same vector was taken again while still active, which the hardware cannot do, so the EXCEPTION_RET packet was not captured.`);
+            }
+            if (desynced > 0) {
+                parts.push(`${desynced} fell in a byte range where the decoder was out of sync, so the return cannot be confirmed either way.`);
+            }
+            if (openAtEot > 0) {
+                parts.push(`${openAtEot} was/were still running when the trace ended, which is expected and benign.`);
+            }
+            warnings.push(parts.join(' '));
+        } else if (exceptionReturnDeficit < 0) {
+            warnings.push(`${Math.abs(exceptionReturnDeficit)} more exception returns than exceptions were seen. The capture began inside one or more handlers, or entry packets were lost.`);
+        }
+        if (exceptionElementCount !== allExceptions.length && rawExceptPackets === 0) {
             warnings.push(`${exceptionElementCount} EXCEPTION elements were seen but ${allExceptions.length} records were produced - ${exceptionElementCount - allExceptions.length} were lost.`);
         }
         if (recordsWithMissingTs > 0) {
@@ -483,8 +900,9 @@ export class ReportGenerator {
         });
 
         const avgIsrCycles = timed.length > 0 ? parseFloat((totalIsrCycles / timed.length).toFixed(1)) : 0;
-        const avgIsrInstructions = allExceptions.length > 0
-            ? parseFloat((totalIsrInstructions / allExceptions.length).toFixed(1)) : 0;
+        const timedCountAll = timed.length;
+        const avgIsrInstructions = timedCountAll > 0
+            ? parseFloat((totalIsrInstructions / timedCountAll).toFixed(1)) : 0;
         const isrCyclePercentage = totalCycles > 0
             ? parseFloat(((totalIsrCycles / totalCycles) * 100).toFixed(2)) : 0;
 
@@ -577,14 +995,21 @@ export class ReportGenerator {
                 percentage: totalInstructions > 0 ? parseFloat(((count / totalInstructions) * 100).toFixed(2)) : 0
             }));
 
+        // Problem records are never sampled away: an exception that did not
+        // return, or whose pair failed validation, is always listed.
+        const problemExceptions = allExceptions.filter(e => e.closure !== 'returned' || !e.pairOk);
         const sampleExceptions: ExceptionRecord[] = [];
         if (allExceptions.length <= 15) {
             sampleExceptions.push(...allExceptions);
         } else {
-            sampleExceptions.push(...allExceptions.slice(0, 6));
+            const picked = new Set<ExceptionRecord>();
+            allExceptions.slice(0, 6).forEach(e => picked.add(e));
             const mid = Math.floor(allExceptions.length / 2);
-            sampleExceptions.push(allExceptions[mid], allExceptions[mid + 1]);
-            sampleExceptions.push(...allExceptions.slice(-4));
+            picked.add(allExceptions[mid]);
+            if (allExceptions[mid + 1]) picked.add(allExceptions[mid + 1]);
+            allExceptions.slice(-4).forEach(e => picked.add(e));
+            problemExceptions.slice(0, 40).forEach(e => picked.add(e));
+            sampleExceptions.push(...Array.from(picked).sort((a, b) => a.index - b.index));
         }
 
         const reportData: TraceReportData = {
@@ -622,6 +1047,24 @@ export class ReportGenerator {
             unmatchedRets,
             unclosedAtEof,
             maxNestingDepth,
+
+            rawExceptPackets,
+            rawExceptRtnPackets,
+            exceptionReturnDeficit,
+            rawOnlyExceptions,
+            unreturnedExceptions,
+            droppedReturns,
+            pairMismatches,
+
+            badPacketCount,
+            malformedSyncCount,
+            desyncEvents,
+            decoderErrors: decoderErrors.slice(0, 20),
+            deadRanges,
+            deadBytes,
+            traceByteLength,
+            captureHealthy,
+            captureVerdict,
 
             totalIsrCycles: r1(totalIsrCycles),
             avgIsrCycles,
@@ -669,6 +1112,29 @@ export class ReportGenerator {
         return v !== null ? '0x' + v.toString(16).toUpperCase() : 'N/A';
     }
 
+    /** Describes the undecodable span a desync event belongs to. */
+    private static deadSpanFor(
+        traceIdx: number,
+        ranges: { from: number; to: number }[]
+    ): string {
+        const own = ranges.find(r => r.from === traceIdx);
+        if (own) return `byte ${own.to.toLocaleString()} (${(own.to - own.from).toLocaleString()} bytes lost)`;
+        const enclosing = ranges.find(r => traceIdx > r.from && traceIdx <= r.to);
+        if (enclosing) {
+            return `already inside the ${enclosing.from.toLocaleString()}-${enclosing.to.toLocaleString()} gap`;
+        }
+        return 'recovered immediately';
+    }
+
+    private static closureLabel(e: ExceptionRecord): string {
+        switch (e.closure) {
+            case 'returned': return e.pairOk ? 'returned' : 'returned (PAIR MISMATCH)';
+            case 'no-return-dropped': return 'NO RETURN - lost packet';
+            case 'no-return-desync': return 'NO RETURN - decoder desync';
+            case 'no-return-eot': return 'no return - trace ended';
+        }
+    }
+
     private static renderMarkdownReport(d: TraceReportData): string {
         let md = `# Trace Execution & Hardware Timing Report\n\n`;
         md += `**Snapshot:** \`${d.snapshotName}\`  \n`;
@@ -703,7 +1169,39 @@ export class ReportGenerator {
         md += `*The head of every capture is unsynchronised. The ETM emits its alignment-sync pattern only once per sync period, so a capture started at an arbitrary instant must wait up to a full period before the decoder can lock on. Those bytes are valid trace data that cannot be interpreted without a preceding sync point - they are not data the logic analyser failed to record. Lower \`TRCSYNCPR\` to shorten this head, at the cost of trace-port bandwidth.*\n\n`;
         md += `---\n\n`;
 
-        md += `## 3. Hardware Timestamps & Active Window Duration\n\n`;
+        md += `## 3. Capture Integrity\n\n`;
+        md += `> **${d.captureHealthy ? 'PASS' : 'FAIL'}** &mdash; ${d.captureVerdict}\n\n`;
+        md += `| Check | Value | Meaning |\n`;
+        md += `| :--- | :--- | :--- |\n`;
+        md += `| **Malformed packets** | **${d.badPacketCount.toLocaleString()}** | Bytes the protocol decoder could not parse |\n`;
+        md += `| **Corrupted sync patterns** | **${d.malformedSyncCount}** | A-Sync must be 11&times;\`0x00\` + \`0x80\`; short ones mean dropped bytes |\n`;
+        md += `| **Decoder desynchronisations** | **${d.desyncEvents.length}** | Times the instruction decoder gave up and restarted |\n`;
+        md += `| **Undecodable byte ranges** | **${d.deadBytes.toLocaleString()} / ${d.traceByteLength.toLocaleString()}** | ${d.traceByteLength > 0 ? ((d.deadBytes / d.traceByteLength) * 100).toFixed(1) : '0'}% of the capture produced no instructions |\n`;
+        md += `| **Exceptions vs returns** | **${d.rawExceptPackets || d.exceptionElementCount} / ${d.rawExceptRtnPackets || d.exceptionRetElementCount}** | Deficit of ${d.exceptionReturnDeficit} |\n`;
+        md += `| **Confirmed lost returns** | **${d.droppedReturns}** | Same vector re-entered while active - impossible in hardware |\n`;
+        md += `| **Failed pair validations** | **${d.pairMismatches}** | Resume address did not match the preferred return address |\n\n`;
+
+        if (d.desyncEvents.length > 0) {
+            md += `### Desynchronisation Events\n\n`;
+            md += `| Byte | Reason | Undecodable span |\n`;
+            md += `| :--- | :--- | :--- |\n`;
+            d.desyncEvents.forEach(ev => {
+                md += `| ${ev.traceIdx.toLocaleString()} | \`${ev.reason}\` | ${this.deadSpanFor(ev.traceIdx, d.deadRanges)} |\n`;
+            });
+            md += `\n`;
+        }
+        if (d.decoderErrors.length > 0) {
+            md += `### Decoder Errors\n\n`;
+            md += `| Byte | Code | Detail |\n`;
+            md += `| :--- | :--- | :--- |\n`;
+            d.decoderErrors.forEach(e => {
+                md += `| ${e.traceIdx !== null ? e.traceIdx.toLocaleString() : 'N/A'} | \`${e.code}\` | ${e.text} |\n`;
+            });
+            md += `\n`;
+        }
+        md += `---\n\n`;
+
+        md += `## 4. Hardware Timestamps & Active Window Duration\n\n`;
         md += `| Parameter | Hardware Value | Notes |\n`;
         md += `| :--- | :--- | :--- |\n`;
         md += `| **First Timestamp (post-sync)** | \`${d.firstTsHex}\` | First TS after the decoder synchronised |\n`;
@@ -717,13 +1215,16 @@ export class ReportGenerator {
         md += `| **Total Trace Packets** | **${d.totalPackets.toLocaleString()}** | Lines parsed from capture |\n\n`;
         md += `---\n\n`;
 
-        md += `## 4. Exception & IRQ Service Routine Analysis\n\n`;
+        md += `## 5. Exception & IRQ Service Routine Analysis\n\n`;
         md += `ISR duration is measured from the **entry timestamp** (first \`TIMESTAMP\` inside the handler, which the ETM emits in response to the exception) to the **exit timestamp** (first \`TIMESTAMP\` after \`EXCEPTION_RET\`). This span includes the exception entry latency but excludes the unstacking that follows the return, so it is a **lower bound** on the interference seen by the preempted thread.\n\n`;
         md += `| Metric | Value | Description |\n`;
         md += `| :--- | :--- | :--- |\n`;
-        md += `| **\`EXCEPTION\` elements seen** | **${d.exceptionElementCount}** | Raw decoder elements |\n`;
-        md += `| **\`EXCEPTION_RET\` elements seen** | **${d.exceptionRetElementCount}** | Raw decoder elements |\n`;
-        md += `| **Records produced** | **${d.exceptionsCount}** | ${d.exceptionsCount === d.exceptionElementCount ? 'All exceptions accounted for' : '**MISMATCH - see warnings**'} |\n`;
+        md += `| **\`I_EXCEPT\` / \`I_EXCEPT_RTN\` packets** | **${d.rawExceptPackets} / ${d.rawExceptRtnPackets}** | Raw protocol layer - independent of the instruction decoder |\n`;
+        md += `| **\`EXCEPTION\` / \`EXCEPTION_RET\` elements** | **${d.exceptionElementCount} / ${d.exceptionRetElementCount}** | Fully decoded, carry timing |\n`;
+        md += `| **Records produced** | **${d.exceptionsCount}** | ${d.exceptionsCount >= Math.max(d.rawExceptPackets, d.exceptionElementCount) ? 'Every exception is reported' : '**MISMATCH - see warnings**'} |\n`;
+        md += `| **Recovered from raw packets only** | **${d.rawOnlyExceptions}** | Occurred, but no timing recoverable |\n`;
+        md += `| **Exceptions that never returned** | **${d.unreturnedExceptions}** | ${d.droppedReturns} confirmed lost return(s) |\n`;
+        md += `| **Failed pair validations** | **${d.pairMismatches}** | Checked by vector and return address |\n`;
         md += `| **Records missing a timestamp** | **${d.recordsWithMissingTs}** | Excluded from timing statistics |\n`;
         md += `| **Max nesting depth** | **${d.maxNestingDepth}** | ${d.maxNestingDepth > 1 ? 'Preemption occurred' : 'No preemption'} |\n`;
         md += `| **IRQ Inter-Arrival Interval** | **${this.us(d.interArrivalPeriodUs)}** | Entry-to-entry, dominant vector |\n`;
@@ -740,17 +1241,28 @@ export class ReportGenerator {
         });
         md += `\n*Max duration is the largest observed value, i.e. a high-water mark, not a proven worst case.*\n\n`;
 
+        const problems = d.allExceptions.filter(e => e.closure !== 'returned' || !e.pairOk);
+        if (problems.length > 0) {
+            md += `### Unpaired / Suspect Exceptions (all ${problems.length} listed)\n\n`;
+            md += `| # | Byte | Vector | Status | Pref. Return | Resumed At | Diagnosis |\n`;
+            md += `| :-: | :--- | :--- | :--- | :--- | :--- | :--- |\n`;
+            problems.forEach(e => {
+                md += `| ${e.index} | ${e.traceIdx !== null ? e.traceIdx.toLocaleString() : 'N/A'} | ${e.type} | **${this.closureLabel(e)}** | \`${e.prefRetAddr || 'N/A'}\` | \`${e.resumeAddr || 'N/A'}\` | ${e.pairNote || '-'} |\n`;
+            });
+            md += `\n`;
+        }
+
         md += `### Timestamps Before and After IRQ Service Routines\n\n`;
-        md += `| # | Type | D | Pre-IRQ TS | Entry TS | Exit TS | &Delta;TS (ticks) | Duration | Cycles | Instrs | Est. Entry Ovh |\n`;
-        md += `| :-: | :--- | :-: | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :---: |\n`;
+        md += `| # | Type | Src | Status | D | Pre-IRQ TS | Entry TS | Exit TS | &Delta;TS | Duration | Cycles | Instrs | Ovh |\n`;
+        md += `| :-: | :--- | :-: | :--- | :-: | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :---: |\n`;
         d.sampleExceptions.forEach(e => {
-            const flag = e.tsComplete ? '' : ' ⚠';
-            md += `| ${e.index}${flag} | ${e.type} | ${e.depth} | \`${this.hex(e.preTs)}\` | \`${this.hex(e.entryTs)}\` | \`${this.hex(e.exitTs)}\` | ${e.durationTicks !== null ? e.durationTicks : 'N/A'} | **${this.us(e.isrDurationUs)}** | ${this.cyc(e.cycles)} | ${e.instructions}${e.instructionsInclusive !== e.instructions ? ` (${e.instructionsInclusive})` : ''} | ${e.estEntryOverheadCycles !== null ? e.estEntryOverheadCycles : 'N/A'} |\n`;
+            const flag = (e.closure === 'returned' && e.pairOk) ? '' : ' ⚠';
+            md += `| ${e.index}${flag} | ${e.type} | ${e.source === 'raw' ? 'raw' : 'dec'} | ${this.closureLabel(e)} | ${e.depth} | \`${this.hex(e.preTs)}\` | \`${this.hex(e.entryTs)}\` | \`${this.hex(e.exitTs)}\` | ${e.durationTicks !== null ? e.durationTicks : 'N/A'} | **${this.us(e.isrDurationUs)}** | ${this.cyc(e.cycles)} | ${e.instructions}${e.instructionsInclusive !== e.instructions ? ` (${e.instructionsInclusive})` : ''} | ${e.estEntryOverheadCycles !== null ? e.estEntryOverheadCycles : 'N/A'} |\n`;
         });
-        md += `\n*Representative sample (start, middle, end). Total occurrences: ${d.exceptionsCount}. "D" is nesting depth; a bracketed instruction count is the inclusive figure. "Est. Entry Ovh" is \`cycles − instructions × CPI\`, an estimate of exception entry latency.*\n\n`;
+        md += `\n*Every exception that did not return cleanly is listed above and in the sample below. Total occurrences: ${d.exceptionsCount}. "Src" is \`dec\` for a fully decoded exception and \`raw\` for one recovered from protocol packets after a decoder desync (no timing available). "D" is nesting depth; a bracketed instruction count is the inclusive figure. "Ovh" is \`cycles − instructions × CPI\`, an estimate of exception entry latency.*\n\n`;
         md += `---\n\n`;
 
-        md += `## 5. Execution Hotspots (Address Distribution)\n\n`;
+        md += `## 6. Execution Hotspots (Address Distribution)\n\n`;
         md += `| Rank | Address Range | Instructions Executed | % Share |\n`;
         md += `| :-: | :--- | :---: | :---: |\n`;
         d.hotspots.forEach((h, idx) => {
@@ -952,8 +1464,44 @@ export class ReportGenerator {
             <p class="note">The head of every capture is unsynchronised. The ETM emits its alignment-sync pattern only once per <code>TRCSYNCPR</code> period, so a capture started at an arbitrary instant must wait up to a full period before the decoder can lock on. Those bytes are valid trace data that cannot be interpreted without a preceding sync point &mdash; not data the logic analyser failed to record. Lower <code>TRCSYNCPR</code> to shorten this head, at the cost of trace-port bandwidth.</p>
         </div>
 
+        <div class="card"${d.captureHealthy ? '' : ' style="border-color: rgba(248,81,73,0.6);"'}>
+            <h2 style="font-size: 15px; margin-bottom: 12px; color: ${d.captureHealthy ? 'var(--heading)' : 'var(--red)'};">
+                3. Capture Integrity &mdash; ${d.captureHealthy ? '<span style="color:var(--green)">PASS</span>' : '<span style="color:var(--red)">FAIL</span>'}
+            </h2>
+            <div class="verdict" style="border-left-color: ${d.captureHealthy ? 'var(--green)' : 'var(--red)'}; background: ${d.captureHealthy ? 'rgba(63,185,80,0.07)' : 'rgba(248,81,73,0.07)'};">${d.captureVerdict}</div>
+            <table>
+                <tbody>
+                    <tr><td style="width: 35%;"><strong>Malformed packets</strong></td><td><b>${d.badPacketCount.toLocaleString()}</b> &mdash; bytes the protocol decoder could not parse</td></tr>
+                    <tr><td><strong>Corrupted sync patterns</strong></td><td><b>${d.malformedSyncCount}</b> &mdash; a valid A-Sync is 11&times;<code>0x00</code> + <code>0x80</code>; a short one means bytes were lost</td></tr>
+                    <tr><td><strong>Decoder desynchronisations</strong></td><td><b>${d.desyncEvents.length}</b></td></tr>
+                    <tr><td><strong>Undecodable byte ranges</strong></td><td><b>${d.deadBytes.toLocaleString()}</b> of ${d.traceByteLength.toLocaleString()} bytes (${d.traceByteLength > 0 ? ((d.deadBytes / d.traceByteLength) * 100).toFixed(1) : '0'}%)</td></tr>
+                    <tr><td><strong>Exceptions vs returns</strong></td><td><b>${d.rawExceptPackets || d.exceptionElementCount} / ${d.rawExceptRtnPackets || d.exceptionRetElementCount}</b> &mdash; deficit ${d.exceptionReturnDeficit}</td></tr>
+                    <tr><td><strong>Confirmed lost returns</strong></td><td><b style="color:${d.droppedReturns > 0 ? 'var(--red)' : 'inherit'}">${d.droppedReturns}</b> &mdash; same vector re-entered while active, impossible in hardware</td></tr>
+                    <tr><td><strong>Failed pair validations</strong></td><td><b style="color:${d.pairMismatches > 0 ? 'var(--red)' : 'inherit'}">${d.pairMismatches}</b> &mdash; resume address did not match the preferred return address</td></tr>
+                </tbody>
+            </table>
+            ${d.desyncEvents.length === 0 ? '' : `
+            <h3 style="font-size: 13px; margin: 18px 0 10px 0; color: var(--heading);">Desynchronisation Events:</h3>
+            <table>
+                <thead><tr><th>Byte</th><th>Reason</th><th>Undecodable span</th></tr></thead>
+                <tbody>
+                    ${d.desyncEvents.map(ev =>
+                        `<tr><td><code>${ev.traceIdx.toLocaleString()}</code></td><td><code>${ev.reason}</code></td><td>${this.deadSpanFor(ev.traceIdx, d.deadRanges)}</td></tr>`
+                    ).join('')}
+                </tbody>
+            </table>`}
+            ${d.decoderErrors.length === 0 ? '' : `
+            <h3 style="font-size: 13px; margin: 18px 0 10px 0; color: var(--heading);">Decoder Errors:</h3>
+            <table>
+                <thead><tr><th>Byte</th><th>Code</th><th>Detail</th></tr></thead>
+                <tbody>
+                    ${d.decoderErrors.map(e => `<tr><td><code>${e.traceIdx !== null ? e.traceIdx.toLocaleString() : 'N/A'}</code></td><td><code>${e.code}</code></td><td>${e.text}</td></tr>`).join('')}
+                </tbody>
+            </table>`}
+        </div>
+
         <div class="card">
-            <h2 style="font-size: 15px; margin-bottom: 12px; color: var(--heading);">3. Hardware Timestamps &amp; Window Timing</h2>
+            <h2 style="font-size: 15px; margin-bottom: 12px; color: var(--heading);">4. Hardware Timestamps &amp; Window Timing</h2>
             <table>
                 <tbody>
                     <tr><td style="width: 35%;"><strong>1st Timestamp (post-sync)</strong></td><td><code>${d.firstTsHex}</code></td></tr>
@@ -970,7 +1518,7 @@ export class ReportGenerator {
         </div>
 
         <div class="card">
-            <h2 style="font-size: 15px; margin-bottom: 12px; color: var(--heading);">4. Interrupt &amp; Exception Handling Performance</h2>
+            <h2 style="font-size: 15px; margin-bottom: 12px; color: var(--heading);">5. Interrupt &amp; Exception Handling Performance</h2>
             <p class="note" style="margin-top:0;">
                 ISR duration spans the <b>entry timestamp</b> (first <code>TIMESTAMP</code> inside the handler, emitted by the ETM in response to the exception)
                 to the <b>exit timestamp</b> (first <code>TIMESTAMP</code> after <code>EXCEPTION_RET</code>).
@@ -979,8 +1527,12 @@ export class ReportGenerator {
             </p>
             <table>
                 <tbody>
-                    <tr><td style="width: 35%;"><strong><code>EXCEPTION</code> / <code>EXCEPTION_RET</code> elements</strong></td><td>${d.exceptionElementCount} / ${d.exceptionRetElementCount}</td></tr>
-                    <tr><td><strong>Records produced</strong></td><td><b>${d.exceptionsCount}</b> ${d.exceptionsCount === d.exceptionElementCount ? '&mdash; all exceptions accounted for' : '&mdash; <span style="color:var(--red)">MISMATCH</span>'}</td></tr>
+                    <tr><td style="width: 35%;"><strong><code>I_EXCEPT</code> / <code>I_EXCEPT_RTN</code> packets</strong></td><td>${d.rawExceptPackets} / ${d.rawExceptRtnPackets} &mdash; raw protocol layer, independent of the instruction decoder</td></tr>
+                    <tr><td><strong><code>EXCEPTION</code> / <code>EXCEPTION_RET</code> elements</strong></td><td>${d.exceptionElementCount} / ${d.exceptionRetElementCount} &mdash; fully decoded, carry timing</td></tr>
+                    <tr><td><strong>Records produced</strong></td><td><b>${d.exceptionsCount}</b> ${d.exceptionsCount >= Math.max(d.rawExceptPackets, d.exceptionElementCount) ? '&mdash; every exception is reported' : '&mdash; <span style="color:var(--red)">MISMATCH</span>'}</td></tr>
+                    <tr><td><strong>Recovered from raw packets only</strong></td><td>${d.rawOnlyExceptions} &mdash; occurred, but no timing recoverable</td></tr>
+                    <tr><td><strong>Exceptions that never returned</strong></td><td><b style="color:${d.unreturnedExceptions > 0 ? 'var(--orange)' : 'inherit'}">${d.unreturnedExceptions}</b> &mdash; ${d.droppedReturns} confirmed lost return(s)</td></tr>
+                    <tr><td><strong>Failed pair validations</strong></td><td><b style="color:${d.pairMismatches > 0 ? 'var(--red)' : 'inherit'}">${d.pairMismatches}</b> &mdash; checked by vector and return address</td></tr>
                     <tr><td><strong>Records missing a timestamp</strong></td><td>${d.recordsWithMissingTs} (excluded from timing statistics)</td></tr>
                     <tr><td><strong>Max nesting depth</strong></td><td>${d.maxNestingDepth} ${d.maxNestingDepth > 1 ? '&mdash; preemption occurred' : '&mdash; no preemption'}</td></tr>
                 </tbody>
@@ -1024,20 +1576,50 @@ export class ReportGenerator {
             </div>
             <p class="note">Max duration is the largest observed value &mdash; a high-water mark, not a proven worst case.</p>
 
+            ${(() => {
+                const problems = d.allExceptions.filter(e => e.closure !== 'returned' || !e.pairOk);
+                if (problems.length === 0) {
+                    return '<p class="note" style="color: var(--green);">Every exception paired with a matching return, validated by vector and return address.</p>';
+                }
+                return `
+            <h3 style="font-size: 13px; margin: 18px 0 10px 0; color: var(--red);">Unpaired / Suspect Exceptions &mdash; all ${problems.length} listed:</h3>
+            <div class="scroll">
+            <table>
+                <thead><tr><th>#</th><th>Byte</th><th>Vector</th><th>Status</th><th>Pref. Return</th><th>Resumed At</th><th>Diagnosis</th></tr></thead>
+                <tbody>
+                    ${problems.map(e => `
+                        <tr style="background: rgba(248,81,73,0.08);">
+                            <td>${e.index}</td>
+                            <td><code>${e.traceIdx !== null ? e.traceIdx.toLocaleString() : 'N/A'}</code></td>
+                            <td><span style="color: var(--purple); font-weight: 600;">${e.type}</span></td>
+                            <td><b style="color: var(--red);">${this.closureLabel(e)}</b></td>
+                            <td><code>${e.prefRetAddr || 'N/A'}</code></td>
+                            <td><code>${e.resumeAddr || 'N/A'}</code></td>
+                            <td style="font-size:12px;">${e.pairNote || '-'}</td>
+                        </tr>`).join('')}
+                </tbody>
+            </table>
+            </div>`;
+            })()}
+
             <h3 style="font-size: 13px; margin: 18px 0 10px 0; color: var(--heading);">Timestamps Before and After IRQ Service Routines:</h3>
             <div class="scroll">
             <table>
                 <thead>
                     <tr>
-                        <th>#</th><th>Type</th><th>Depth</th><th>Pre-IRQ TS</th><th>Entry TS</th><th>Exit TS</th>
+                        <th>#</th><th>Type</th><th>Src</th><th>Status</th><th>Depth</th><th>Pre-IRQ TS</th><th>Entry TS</th><th>Exit TS</th>
                         <th>&Delta;TS (ticks)</th><th>Duration</th><th>Cycles</th><th>Instrs</th><th>Est. Entry Ovh</th>
                     </tr>
                 </thead>
                 <tbody>
-                    ${d.sampleExceptions.map(e => `
-                        <tr${e.tsComplete ? '' : ' style="background: rgba(248,81,73,0.08);"'}>
-                            <td>${e.index}${e.tsComplete ? '' : ' &#9888;'}</td>
+                    ${d.sampleExceptions.map(e => {
+                        const ok = e.closure === 'returned' && e.pairOk;
+                        return `
+                        <tr${ok ? '' : ' style="background: rgba(248,81,73,0.08);"'}>
+                            <td>${e.index}${ok ? '' : ' &#9888;'}</td>
                             <td><span style="color: var(--purple); font-weight: 600;">${e.type}</span></td>
+                            <td><code>${e.source === 'raw' ? 'raw' : 'dec'}</code></td>
+                            <td${ok ? '' : ' style="color: var(--red); font-weight: 600;"'}>${this.closureLabel(e)}</td>
                             <td>${e.depth}</td>
                             <td><code>${this.hex(e.preTs)}</code></td>
                             <td><code>${this.hex(e.entryTs)}</code></td>
@@ -1047,20 +1629,21 @@ export class ReportGenerator {
                             <td>${this.cyc(e.cycles)}</td>
                             <td>${e.instructions}${e.instructionsInclusive !== e.instructions ? ` <span style="color:var(--muted)">(${e.instructionsInclusive})</span>` : ''}</td>
                             <td>${e.estEntryOverheadCycles !== null ? e.estEntryOverheadCycles : 'N/A'}</td>
-                        </tr>
-                    `).join('')}
+                        </tr>`;
+                    }).join('')}
                 </tbody>
             </table>
             </div>
             <p class="note">
-                Representative samples across the trace window. Total exception occurrences: ${d.exceptionsCount}.
+                Every exception that did not return cleanly is listed above and included below. Total exception occurrences: ${d.exceptionsCount}.
+                &ldquo;Src&rdquo; is <code>dec</code> for a fully decoded exception and <code>raw</code> for one recovered from protocol packets after a decoder desync (no timing available).
                 A bracketed instruction count is the inclusive figure (this handler plus anything that preempted it).
                 &ldquo;Est. Entry Ovh&rdquo; is <code>cycles &minus; instructions &times; CPI</code>, an estimate of exception entry latency.
             </p>
         </div>
 
         <div class="card">
-            <h2 style="font-size: 15px; margin-bottom: 12px; color: var(--heading);">5. Execution Hotspots (Address Distribution)</h2>
+            <h2 style="font-size: 15px; margin-bottom: 12px; color: var(--heading);">6. Execution Hotspots (Address Distribution)</h2>
             <table>
                 <thead>
                     <tr><th>Rank</th><th>Address Range</th><th>Instructions Executed</th><th>Share</th></tr>
